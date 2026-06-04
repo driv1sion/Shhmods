@@ -1,4 +1,6 @@
-# Digital-Content-Moderator
-A SQL-based content moderation system with automated flagging and dynamic user trust scoring.  
+# Shhmods
 
-This is a DBMS Lab team project.
+A lightweight, database-driven digital content moderation system.
+
+Shhmods automates text moderation and dynamically computes user trust scores directly through database-level logic.
+

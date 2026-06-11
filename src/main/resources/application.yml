@@ -1,0 +1,11 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:shhmods}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:password}
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    placeholders:
+      app_user_password: ${APP_USER_PASSWORD:app_password}
+      admin_password: ${ADMIN_PASSWORD:admin_password}

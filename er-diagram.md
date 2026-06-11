@@ -93,6 +93,36 @@ Maintains an immutable record of moderation-related system actions.
 - reference_id – affected entity identifier  
 - reference_type – affected entity type  
 
+### **9. MODERATION_PRECEDENT (Strong Entity)**
+**Description:**  
+Stores historical moderation cases and their vector embeddings for Case-Based Reasoning.
+
+**Attributes:**
+- precedent_id (Primary Key)
+- content_hash
+- content_embedding – vector representation
+- final_decision
+
+### **10. RULE_PROPOSAL (Weak Entity)**
+**Description:**  
+Proposed by the N-gram Agent, linked to BANNED_WORD.
+
+**Attributes:**
+- proposal_id (Primary Key)
+- proposed_phrase
+- statistical_confidence
+- status
+
+### **11. ATTACK_GRAPH_LOG (Strong Entity)**
+**Description:**  
+Logs detected swatter rings by the Graph-Based Agent.
+
+**Attributes:**
+- attack_id (Primary Key)
+- target_user_id
+- calculated_variance
+- penalized_users_array
+
 
 ## 3) RELATIONSHIPS
 

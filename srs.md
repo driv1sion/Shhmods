@@ -67,6 +67,9 @@ Assumes DBMS supports triggers/stored procedures (e.g., PostgreSQL); stable sche
 - **FR5**: Computes trust score = (100 \* (1 - violation_rate)) + (account_age_days / 365 \* 10) + (accurate_reports \* 5); updates via stored procedure on events.
 - **FR6**: Creates views: vw_flagged_content (all flags), vw_top_users (trust_score > 80), vw_audit_log (decision traces).
 - **FR7**: Trigger auto-runs score recalculation on flag resolution or report validation.
+- **FR8**: System shall execute asynchronous Case-Based Reasoning by calculating vector distance (`pgvector`) between current flagged content and historically resolved content.
+- **FR9**: System shall calculate statistical variance of reporter metrics to identify coordinated attack graphs (Botnets).
+- **FR10**: System shall utilize N-gram analysis on the `REPORT` table to automatically extract high-probability evasion phrases and propose new banned words.
 
 ---  
 

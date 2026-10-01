@@ -16,7 +16,7 @@ Targeted at developers, DBAs, platform owners, and stakeholders. Read Section 1 
 
 ### **1.4 Project Scope**
 
-In-scope: Moderation of forum posts/comments/reviews via banned keywords, duplicates, posting frequency, and user reports; trust score calculation from violations, activity, and reporting accuracy; DBMS automation with triggers, procedures, and views. Out-of-scope: Image/video moderation, external ML APIs, mobile apps.
+In-scope: Moderation of forum posts/comments/reviews via banned keywords, duplicates, posting frequency, and user reports; trust score calculation from violations, activity, and reporting accuracy; DBMS automation with triggers, procedures, and views; Spring Boot backend for API endpoints; Post-Launch ML agents. Out-of-scope: Image/video moderation, external third-party paid ML APIs, mobile apps.
 
 ### **1.5 References**
 
@@ -45,11 +45,13 @@ Current moderation relies on costly, opaque ML tools; this system uses auditable
 
 ### **2.4 Operating Environment**
 
-Relational DBMS (e.g., PostgreSQL 15+ or MySQL 8+), server with 8GB+ RAM, Linux/Windows. Web frontend optional via SQL views.
+### **2.4 Operating Environment**
+
+PostgreSQL 15+ DBMS, Java 17+ (Spring Boot), Docker/Testcontainers, React.js frontend.
 
 ### **2.5 Design and Implementation Constraints**
 
-Pure SQL implementation: triggers, stored procedures, functions, views. No external languages/APIs. Schema supports full-text search and window functions for analytics.
+Database-first moderation engine utilizing PostgreSQL triggers, stored procedures, and views. Backend is a Java Spring Boot REST API ensuring idempotent Outbox event processing. Post-launch Python ML sidecars run in isolated containers. Strict use of FOSS technologies with zero external paid APIs.
 
 ### **2.6 Assumptions and Dependencies**
 
@@ -60,16 +62,16 @@ Assumes DBMS supports triggers/stored procedures (e.g., PostgreSQL); stable sche
 ## **3. System Features**  
 ### **3.1 Functional Requirements**
 
-- **FR1**: System scans new posts/comments/reviews for banned keywords (table: banned_words); flags if match count > 0 via BEFORE INSERT TRIGGER.
-- **FR2**: Detects duplicates by hashing content (MD5/SHA); flags if hash exists in last 24h via TRIGGER.
-- **FR3**: Flags users exceeding 10 posts/hour via window function tracking post timestamps.
-- **FR4**: Flags content on 3+ user reports (report_count >= 3) within 7 days.
-- **FR5**: Computes trust score = (100 \* (1 - violation_rate)) + (account_age_days / 365 \* 10) + (accurate_reports \* 5); updates via stored procedure on events.
-- **FR6**: Creates views: vw_flagged_content (all flags), vw_top_users (trust_score > 80), vw_audit_log (decision traces).
+- **FR1**: System scans new posts/comments/reviews for banned keywords (table: banned_word); flags if match count > 0 via BEFORE INSERT TRIGGER.
+- **FR2**: Detects duplicates by hashing content (SHA-256); flags if hash exists in last 24h via TRIGGER.
+- **FR3**: Flags users exceeding burst and sustained rate limits via window functions. Limits are dynamically read from `tenant_config`.
+- **FR4**: Flags content on 3+ user reports (report_threshold read from `tenant_config`) within 7 days.
+- **FR5**: Computes trust score dynamically via stored procedure. Formula weights are dynamically read from `tenant_config` to eliminate hardcoded values.
+- **FR6**: Creates views: vw_flagged_content (all active flags), vw_top_users (trust_score > 80), vw_audit_log (immutable decision traces).
 - **FR7**: Trigger auto-runs score recalculation on flag resolution or report validation.
-- **FR8**: System shall execute asynchronous Case-Based Reasoning by calculating vector distance (`pgvector`) between current flagged content and historically resolved content.
-- **FR9**: System shall calculate statistical variance of reporter metrics to identify coordinated attack graphs (Botnets).
-- **FR10**: System shall utilize N-gram analysis on the `REPORT` table to automatically extract high-probability evasion phrases and propose new banned words.
+- **FR8 (Post-Launch)**: System shall execute asynchronous Case-Based Reasoning by calculating vector distance (`pgvector`) between current flagged content and historically resolved content.
+- **FR9 (Post-Launch)**: System shall detect coordinated attack graphs (Botnets) via Phase 4 SQL variance checks, followed by Phase 6+ Python Isolation Forest sidecars.
+- **FR10 (Post-Launch)**: System shall utilize N-gram analysis on the `report` table to automatically extract high-probability evasion phrases and propose new banned words.
 
 ---  
 

@@ -1,14 +1,16 @@
 -- V1__init_extensions_and_roles.sql
 
 -- Enable required extensions
+-- pg_trgm: trigram similarity for fuzzy/leetspeak matching (covers all our text matching needs)
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;
+-- pgcrypto: cryptographic hashing for PII (IP addresses)
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
--- Note: pgvector might require specific installation depending on the environment.
--- We will enable it if it's available. If it fails, uncomment the next line and handle it later or ignore for this phase.
+-- pgvector: semantic embeddings for Case-Based Reasoning (Phase 6).
+-- Requires the vector extension to be installed on the server (e.g., `apt install postgresql-16-pgvector`).
+-- Uncomment when ready for Phase 6:
 -- CREATE EXTENSION IF NOT EXISTS vector;
 
--- Create least-privilege app user
+-- Create least-privilege app user (used by Spring Boot API — INSERT/SELECT on specific tables only)
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'app_user') THEN
@@ -17,11 +19,11 @@ BEGIN
 END
 $$;
 
--- Create admin role
+-- Create admin role (used by admin dashboard — full read, limited write)
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'admin') THEN
-    CREATE ROLE admin WITH LOGIN PASSWORD '${admin_password}';
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'shhmods_admin') THEN
+    CREATE ROLE shhmods_admin WITH LOGIN PASSWORD '${admin_password}';
   END IF;
 END
 $$;

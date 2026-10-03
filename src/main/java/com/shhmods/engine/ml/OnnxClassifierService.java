@@ -16,12 +16,12 @@ public class OnnxClassifierService {
 
     public OnnxClassifierService() {
         logger.info("Initializing ONNX Runtime Environment for Text Classification...");
-        // Fallback for Phase 4 stub
+        // Fallback stub
     }
 
     public boolean isToxic(String text) {
         // Implement inference here using the ONNX session
-        // For now, this acts as a stub to complete the Phase 4 architectural skeleton.
+        // For now, this acts as a stub to complete the architectural skeleton.
         logger.debug("Running contextual toxicity inference on: {}", text);
         return false;
     }

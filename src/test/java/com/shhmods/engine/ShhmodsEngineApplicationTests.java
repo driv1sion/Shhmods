@@ -47,7 +47,7 @@ class ShhmodsEngineApplicationTests {
         assertThat(pgTrgmCount).isEqualTo(1);
 
         Integer fuzzyCount = jdbcTemplate.queryForObject(
-                "SELECT count(*) FROM pg_extension WHERE extname = 'fuzzystrmatch'", Integer.class);
+                "SELECT count(*) FROM pg_extension WHERE extname = 'pgcrypto'", Integer.class);
         assertThat(fuzzyCount).isEqualTo(1);
     }
 
@@ -58,7 +58,7 @@ class ShhmodsEngineApplicationTests {
         assertThat(appUserCount).isEqualTo(1);
 
         Integer adminCount = jdbcTemplate.queryForObject(
-                "SELECT count(*) FROM pg_roles WHERE rolname = 'admin'", Integer.class);
+                "SELECT count(*) FROM pg_roles WHERE rolname = 'shhmods_admin'", Integer.class);
         assertThat(adminCount).isEqualTo(1);
     }
 

@@ -60,7 +60,7 @@ public class OutboxWorker {
 
     private void processEvent(String eventType, String payload) {
         // Here we would integrate with the ML sidecar, execute ML inference, 
-        // generate vector embeddings for flagged content (Phase 6), 
+        // generate vector embeddings for flagged content, 
         // or send external webhook notifications.
         logger.info("Handled event type {}: {}", eventType, payload);
         

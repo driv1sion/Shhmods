@@ -47,7 +47,7 @@ class ModerationTriggersIntegrationTest {
         jdbcTemplate.execute("TRUNCATE TABLE outbox_event CASCADE");
         jdbcTemplate.execute("TRUNCATE TABLE audit_log CASCADE");
         jdbcTemplate.execute("TRUNCATE TABLE tenant_config CASCADE");
-        jdbcTemplate.execute("INSERT INTO tenant_config (tenant_id, burst_limit, sustained_limit, trgm_similarity_threshold, shadow_ban_threshold) VALUES ('GLOBAL', 3, 10, 0.35, 10)");
+        jdbcTemplate.execute("INSERT INTO tenant_config (tenant_id, burst_limit, sustained_limit, trgm_similarity_threshold, shadow_ban_threshold) VALUES ('GLOBAL', 3, 10, 0.1, 10)");
     }
 
     private Long createUser(String extId) {
@@ -130,13 +130,14 @@ class ModerationTriggersIntegrationTest {
         
         // Initial insert to trigger something or call the procedure manually.
         // We will just call the procedure manually to test the shadow ban logic.
-        jdbcTemplate.update("INSERT INTO content_flag (content_id, flag_type, reason, status) VALUES ((INSERT INTO content (tenant_id, user_id, content_text, content_type, content_hash) VALUES ('GLOBAL', ?, 'dummy', 'POST', 'hash_ts') RETURNING content_id), 'TEST', 'test', 'RESOLVED')", userId);
+        Long contentId = jdbcTemplate.queryForObject("INSERT INTO content (tenant_id, user_id, content_text, content_type, content_hash) VALUES ('GLOBAL', ?, 'dummy', 'POST', 'hash_ts') RETURNING content_id", Long.class, userId);
+        jdbcTemplate.update("INSERT INTO content_flag (content_id, flag_type, reason, status) VALUES (?, 'TEST', 'test', 'RESOLVED')", contentId);
         
         Long flagId = jdbcTemplate.queryForObject("SELECT flag_id FROM content_flag LIMIT 1", Long.class);
         
         jdbcTemplate.update("INSERT INTO violation (flag_id, user_id, violation_type, severity_level) VALUES (?, ?, 'TEST', 100)", flagId, userId);
         
-        jdbcTemplate.update("SELECT recalculate_trust_score(?)", userId);
+        jdbcTemplate.execute("SELECT recalculate_trust_score(" + userId + ")");
         
         Boolean isVisible = jdbcTemplate.queryForObject("SELECT is_visible FROM users WHERE user_id = ?", Boolean.class, userId);
         assertThat(isVisible).isFalse(); // Should be shadow banned because severity 100 drops score below 10

@@ -5,9 +5,9 @@
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 -- pgcrypto: cryptographic hashing for PII (IP addresses)
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
--- pgvector: semantic embeddings for Case-Based Reasoning (Phase 6).
+-- pgvector: semantic embeddings for Case-Based Reasoning.
 -- Requires the vector extension to be installed on the server (e.g., `apt install postgresql-16-pgvector`).
--- Uncomment when ready for Phase 6:
+-- Uncomment when ready for Case-Based Reasoning:
 -- CREATE EXTENSION IF NOT EXISTS vector;
 
 -- Create least-privilege app user (used by Spring Boot API — INSERT/SELECT on specific tables only)

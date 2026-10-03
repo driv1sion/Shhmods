@@ -51,3 +51,12 @@ docs/features.md
 # Local Secrets / Config
 *.properties
 !gradle/wrapper/gradle-wrapper.properties
+.env
+.env.*
+
+# Python Scripts
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/

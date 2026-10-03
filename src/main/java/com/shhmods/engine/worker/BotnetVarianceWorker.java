@@ -20,13 +20,13 @@ public class BotnetVarianceWorker {
     }
 
     /**
-     * Phase 4 (SQL Variance Check): A Spring @Scheduled job queries report and users and computes 
+     * SQL Variance Check: A Spring @Scheduled job queries report and users and computes 
      * STDDEV of reporter account ages and trust scores for any target with 5+ reports in a short window. 
      * Anomalously low variance (all reporters created at the same time) triggers a flag.
      */
     @Scheduled(fixedRate = 60000) // Run every minute
     public void detectBotnets() {
-        logger.debug("Running Phase 4 SQL Variance Botnet Check...");
+        logger.debug("Running SQL Variance Botnet Check...");
         
         // This is a simplified example of the variance check.
         // It looks for content with > 5 reports in the last hour and checks variance of reporter creation times.
@@ -52,7 +52,7 @@ public class BotnetVarianceWorker {
                 try {
                     jdbcTemplate.update("""
                         INSERT INTO content_flag (content_id, flag_type, reason, status) 
-                        VALUES (?, 'BOTNET_ATTACK', 'Anomalous reporting variance detected via Phase 4 SQL check', 'PENDING')
+                        VALUES (?, 'BOTNET_ATTACK', 'Anomalous reporting variance detected via SQL check', 'PENDING')
                         ON CONFLICT DO NOTHING
                         """, contentId);
                 } catch (Exception e) {

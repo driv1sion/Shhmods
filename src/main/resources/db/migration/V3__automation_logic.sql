@@ -8,7 +8,7 @@ BEGIN
     -- 1. Remove zero-width characters (e.g., U+200B)
     -- 2. Basic diacritic stripping for Zalgo defense
     -- Note: PostgreSQL doesn't have a built-in NFKC normalizer without extensions like unaccent
-    -- For this phase, we'll strip common invisible characters.
+    -- For now, we'll strip common invisible characters.
     RETURN regexp_replace(input_text, '[\u200B-\u200D\uFEFF]', '', 'g');
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
@@ -99,7 +99,7 @@ BEGIN
         WHERE (tenant_id = NEW.tenant_id OR tenant_id = 'GLOBAL')
           AND word_status = 'ACTIVE'
           AND (
-              (match_type = 'EXACT_WORD_ONLY' AND v_normalized_text ~* ('\b' || keyword || '\b')) OR
+              (match_type = 'EXACT_WORD_ONLY' AND v_normalized_text ~* ('\y' || keyword || '\y')) OR
               (match_type = 'SUBSTRING_ALLOWED' AND (
                   v_normalized_text ILIKE '%' || keyword || '%' OR 
                   similarity(v_normalized_text, keyword) > v_similarity_threshold
@@ -114,7 +114,7 @@ BEGIN
 
     -- Regex PII/URL detect (Simple URL regex example)
     IF NOT v_match_found THEN
-        IF v_normalized_text ~* 'https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)' THEN
+        IF v_normalized_text ~* 'https?://[a-zA-Z0-9\\.\\-]+' THEN
             v_match_found := TRUE;
             v_reason := 'Suspicious URL detected';
         END IF;

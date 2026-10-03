@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  shhmods-db:
+    image: postgres:15-alpine
+    container_name: shhmods-db
+    environment:
+      POSTGRES_DB: shhmods
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d shhmods"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  shhmods-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shhmods-backend
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://shhmods-db:5432/shhmods
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=password
+      - SPRING_FLYWAY_URL=jdbc:postgresql://shhmods-db:5432/shhmods
+      - SPRING_FLYWAY_USER=postgres
+      - SPRING_FLYWAY_PASSWORD=password
+      - APP_USER_PASSWORD=app_password
+      - ADMIN_PASSWORD=admin_password
+    ports:
+      - "8080:8080"
+    depends_on:
+      shhmods-db:
+        condition: service_healthy
+
+  shhmods-frontend:
+    build:
+      context: ./admin-ui
+      dockerfile: Dockerfile
+    container_name: shhmods-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - shhmods-backend
+
+volumes:
+  pgdata:

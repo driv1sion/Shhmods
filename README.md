@@ -35,7 +35,7 @@ flowchart TD
         OutboxWorker -->|Future ML| ML[ONNX DistilBERT Inference]
         OutboxWorker -->|Notifications| Webhook[Webhook Dispatcher]
         
-        DB -->|STDDEV(account_age)| BotnetWorker[Botnet Variance Agent]
+        DB -->|STDDEV account_age| BotnetWorker[Botnet Variance Agent]
     end
     
     AdminUI[React + TS Admin Dashboard] -->|GET /api/v1/admin/*| API

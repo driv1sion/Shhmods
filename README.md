@@ -10,7 +10,7 @@ Traditional content moderation relies heavily on costly external ML APIs (like O
 
 ## The Solution
 
-Shhmods solves this by pushing deterministic, explainable moderation logic down to the database engine. By utilizing PostgreSQL's `pg_trgm` for fuzzy string matching, window functions for rate limiting, and standard deviation checks for botnet variance, Shhmods provides an **auditable**, **zero-budget**, and **highly scalable** solution.
+Shhmods solves this by pushing deterministic, explainable moderation logic down to the database engine. By utilizing PostgreSQL's `pg_trgm` for fuzzy string matching, window functions for rate limiting, and standard deviation checks for botnet variance, Shhmods provides an **auditable** and **highly scalable** solution.
 
 ## High-Level Architecture (HLD)
 

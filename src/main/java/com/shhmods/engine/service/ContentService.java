@@ -86,6 +86,15 @@ public class ContentService {
         Object eventId = jdbcTemplate.queryForObject(ledgerSql, Object.class, 
             request.getTenantId(), userId, hash, result.getNormalizedText(), signalsJson, result.getPolicyVersion(), result.getDecision().name());
 
+        // 6.5 Record Trust Event if applicable
+        if (result.getPenalty() != null) {
+            String trustSql = """
+                INSERT INTO trust_event (user_id, compartment, penalty, decay_rate)
+                VALUES (?, ?, ?, ?)
+                """;
+            jdbcTemplate.update(trustSql, userId, result.getCompartment(), result.getPenalty(), result.getDecayRate());
+        }
+
         // 7. Transactional Outbox 
         String outboxSql = """
             INSERT INTO outbox_event (aggregate_type, aggregate_id, event_type, payload)

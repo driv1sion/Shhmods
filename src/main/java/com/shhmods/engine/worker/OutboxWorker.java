@@ -44,7 +44,7 @@ public class OutboxWorker {
         for (Map<String, Object> event : events) {
             Long eventId = (Long) event.get("event_id");
             String eventType = (String) event.get("event_type");
-            String payload = (String) event.get("payload");
+            String payload = event.get("payload") != null ? event.get("payload").toString() : "{}";
             
             try {
                 processEvent(eventType, payload);

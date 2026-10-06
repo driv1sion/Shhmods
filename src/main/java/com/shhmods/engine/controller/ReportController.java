@@ -31,8 +31,15 @@ public class ReportController {
         Integer count = jdbcTemplate.queryForObject(countSql, Integer.class, contentId);
 
         if (count != null && count >= 3) {
-            jdbcTemplate.update("INSERT INTO content_flag (content_id, flag_type, reason, report_count) VALUES (?, 'USER_REPORTS', 'Content flagged by multiple users', ?) ON CONFLICT DO NOTHING",
-                    contentId, count);
+            String insertFlagSql = """
+                INSERT INTO content_flag (content_id, flag_type, reason, report_count) 
+                SELECT ?, 'USER_REPORTS', 'Content flagged by multiple users', ?
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM content_flag 
+                    WHERE content_id = ? AND flag_type = 'USER_REPORTS' AND status != 'RESOLVED'
+                )
+                """;
+            jdbcTemplate.update(insertFlagSql, contentId, count, contentId);
         }
 
         return Map.of("status", "success");

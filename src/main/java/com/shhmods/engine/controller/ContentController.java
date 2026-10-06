@@ -48,15 +48,13 @@ public class ContentController {
             return ResponseEntity.status(HttpStatus.CREATED)
                     .body(Map.of("status", "success", "content_id", contentId));
                     
-        } catch (DataAccessException ex) {
-            // Check for specific exception messages raised by our trigger
+        } catch (RuntimeException ex) {
             String msg = ex.getMessage() != null ? ex.getMessage() : "";
             if (msg.contains("Burst rate limit exceeded") || msg.contains("Sustained rate limit exceeded")) {
                 return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                        .body(Map.of("status", "error", "message", "Rate limit exceeded by database triggers"));
+                        .body(Map.of("status", "error", "message", "Rate limit exceeded by decision engine"));
             }
-            
-            logger.error("Database error while creating content", ex);
+            logger.error("Error while creating content", ex);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("status", "error", "message", "Internal Server Error"));
         }

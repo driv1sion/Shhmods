@@ -19,10 +19,12 @@ public class DecisionEngine {
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final TextNormalizationService normalizer;
 
-    public DecisionEngine(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+    public DecisionEngine(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper, TextNormalizationService normalizer) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
+        this.normalizer = normalizer;
     }
 
     private Double getTrustScore(Long userId, String compartment) {
@@ -99,7 +101,7 @@ public class DecisionEngine {
             }
         }
 
-        String normalizedText = normalizeText(request.getContentText());
+        String normalizedText = normalizer.normalize(request.getContentText());
         signals.put("normalized_length", normalizedText.length());
 
         String burstSql = "SELECT COUNT(*) FROM content WHERE user_id = ? AND created_at > NOW() - INTERVAL '1 minute'";
@@ -193,8 +195,5 @@ public class DecisionEngine {
         return new DecisionResult(ModerationDecision.ALLOW, "Passed all checks", signals, 1, normalizedText);
     }
 
-    private String normalizeText(String input) {
-        if (input == null) return "";
-        return input.replaceAll("[\\u200B-\\u200D\\uFEFF]", "").toLowerCase();
-    }
+
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Users, FileText, Settings, Activity, Server, AlertTriangle, CheckCircle, Clock, Cpu, Zap, ShieldAlert } from 'lucide-react';
+import { Users, FileText, Settings, Activity, Server, AlertTriangle, CheckCircle, Clock, Cpu, Zap, ShieldAlert, Network } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { GraphIntelligence } from './components/GraphIntelligence';
 
 function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -110,6 +111,10 @@ function App() {
             <AlertTriangle className="w-4 h-4" /> Flag Queue
             {flags.length > 0 && <span className="ml-auto bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 text-xs py-0.5 px-2 rounded-none-full font-medium border border-gray-200 dark:border-zinc-800">{flags.length}</span>}
           </div>
+          <div className={navItemClass('graph')} onClick={() => setActiveTab('graph')}>
+            <Network className="w-4 h-4" /> Graph Intelligence
+            <span className="ml-auto bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-400 text-xs py-0.5 px-2 font-mono font-medium border border-red-200 dark:border-red-500/30">3</span>
+          </div>
           <div className={navItemClass('classifier')} onClick={() => { setActiveTab('classifier'); if (!classifierResult) runClassification(); }}>
             <Cpu className="w-4 h-4" /> ONNX Classifier
           </div>
@@ -156,24 +161,32 @@ function App() {
                   <StatCard title="Avg Latency" value="14ms" icon={<Clock className="text-gray-400 dark:text-zinc-500 w-4 h-4" />} trend="PostgreSQL Native" />
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 p-5 rounded-none-none shadow-sm">
-                    <h3 className="text-sm font-semibold text-gray-900 dark:text-zinc-100 mb-4">Graph Intelligence</h3>
-                    <div className="h-32 border border-gray-100 dark:border-zinc-800/50 rounded-none bg-gray-50 dark:bg-zinc-900 flex items-center justify-center">
-                      <p className="text-gray-500 dark:text-zinc-400 font-mono text-xs">4 active content_clusters detected</p>
-                    </div>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  <div className="lg:col-span-2">
+                    <GraphIntelligence variant="compact" onExpand={() => setActiveTab('graph')} />
                   </div>
-                  <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 p-5 rounded-none-none shadow-sm">
-                    <h3 className="text-sm font-semibold text-gray-900 dark:text-zinc-100 mb-4">Recent Ledger Commits</h3>
-                    <div className="space-y-2">
-                      {[1, 2, 3].map(i => (
-                        <div key={i} className="flex justify-between items-center text-sm">
-                          <span className="text-gray-900 dark:text-zinc-100 font-medium">BLOCK</span>
-                          <span className="text-gray-500 dark:text-zinc-400 font-mono text-xs">{"{spam_trust: 12.0}"}</span>
-                          <span className="text-gray-400 dark:text-zinc-500">tenant_a</span>
-                        </div>
-                      ))}
+                  <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 p-5 rounded-none shadow-sm flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-sm font-semibold text-gray-900 dark:text-zinc-100">Recent Ledger Commits</h3>
+                        <span className="text-xs font-mono text-gray-400">Triggered</span>
+                      </div>
+                      <div className="space-y-3">
+                        {(audit.length ? audit.slice(0, 4) : mockAudit.slice(0, 3)).map((item: any, i: number) => (
+                          <div key={i} className="flex justify-between items-center text-xs pb-2 border-b border-gray-100 dark:border-zinc-800 last:border-none">
+                            <span className="text-gray-900 dark:text-zinc-100 font-semibold">{item.action_type || 'BLOCK'}</span>
+                            <span className="text-gray-500 dark:text-zinc-400 font-mono text-[11px] truncate max-w-[100px]">{item.reference_type || '{spam: 12.0}'}</span>
+                            <span className="text-gray-400 dark:text-zinc-500 font-mono text-[11px]">{item.actor_type || 'ENGINE'}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
+                    <button
+                      onClick={() => setActiveTab('audit')}
+                      className="mt-4 w-full py-1.5 text-xs text-center border border-gray-200 dark:border-zinc-800 text-gray-600 dark:text-zinc-400 hover:text-orange-500 hover:border-orange-500 transition-colors"
+                    >
+                      View Full Ledger →
+                    </button>
                   </div>
                 </div>
               </motion.div>
@@ -200,6 +213,24 @@ function App() {
                     </div>
                   ))}
                 </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'graph' && (
+              <motion.div key="graph" initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} transition={{ duration: 0.15 }} className="space-y-6">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-2xl font-semibold text-gray-900 dark:text-zinc-100 tracking-tight">Graph Intelligence Explorer</h2>
+                    <span className="bg-orange-100 dark:bg-orange-500/20 text-orange-600 dark:text-orange-400 text-xs font-mono px-2 py-0.5 border border-orange-200 dark:border-orange-500/30">
+                      Materialized Views
+                    </span>
+                  </div>
+                  <p className="text-gray-500 dark:text-zinc-400 text-sm mt-1">
+                    Analyzing duplicate content rings (`content_clusters`) and brigading swarms (`coordination_clusters`) across platform tenants.
+                  </p>
+                </div>
+
+                <GraphIntelligence variant="full" />
               </motion.div>
             )}
 
@@ -404,7 +435,7 @@ function App() {
                         <span className="text-gray-900 dark:text-zinc-100 font-medium">{log.action_type || 'BLOCK'}</span>
                         <span className="text-gray-500 dark:text-zinc-400 font-mono text-xs">{log.reference_type || 'spam_trust < 10'}</span>
                       </div>
-                      <span className="text-xs text-gray-400 dark:text-zinc-500 font-mono">{log.action_timestamp || new Date().toISOString()}</span>
+                      <span className="text-xs text-gray-400 dark:text-zinc-500 font-mono">{log.action_timestamp || 'Just now'}</span>
                     </div>
                   ))}
                 </div>

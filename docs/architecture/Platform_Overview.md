@@ -13,12 +13,16 @@ Shhmods operates on three fundamental principles:
 ## The Orchestration Layer
 At its core, Shhmods is an Orchestration Engine built in Spring Boot and powered by PostgreSQL.
 
-When a user posts content, the API evaluates it in milliseconds:
-1. **Signal Gathering:** The engine fetches the user's current Trust Scores across multiple compartments (Spam, Harassment, Coordination), their account age, and their recent burst metrics.
-2. **Graph Evaluation:** The engine queries real-time materialized views to see if the user is acting as part of a coordinated swarm (Botnets / Brigading).
-3. **Policy Overrides:** The engine checks if the community (Tenant) has instituted custom bypass rules for their users.
-4. **The Verdict:** The engine reaches a decision (ALLOW, REVIEW, THROTTLE, or BLOCK).
-5. **The Ledger:** In a single, atomic database transaction, the content is saved, the trust penalties are applied, and the exact reasoning is carved into an immutable `moderation_event` ledger.
+1. **Text Normalization & Zero-Shot AI:** The raw text is normalized (homoglyphs, invisible characters, deduplication) and passed through a local pre-trained **ONNX Transformer** (`unitary/toxic-bert`) to compute multi-label toxicity and threat probabilities in ~12ms.
+2. **Signal Gathering:** The engine fetches the user's current Trust Scores across multiple compartments (Spam, Harassment, Coordination), their account age, and their recent burst metrics.
+3. **Graph Evaluation:** The engine queries real-time materialized views to see if the user is acting as part of a coordinated swarm (Botnets / Brigading).
+4. **Policy Overrides:** The engine checks if the community (Tenant) has instituted custom bypass rules for their users.
+5. **The Verdict:** The engine reaches a decision (ALLOW, REVIEW, THROTTLE, or BLOCK).
+6. **The Ledger:** In a single, atomic database transaction, the content is saved, the trust penalties are applied, and the exact reasoning and ML signals are carved into an immutable `moderation_event` ledger.
 
 ## Next Steps
-To understand how Shhmods makes these decisions, proceed to [Trust and Decay Model](Trust_and_Decay_Model.md).
+To understand how Shhmods makes these decisions, proceed to:
+- [Zero-Shot ONNX Text Classification](Text_Classification_ONNX.md)
+- [Trust and Decay Model](Trust_and_Decay_Model.md)
+- [Graph Coordination Engine](Graph_Detection_Engine.md)
+- [Tenant Policy Overrides](Policy_Overrides.md)

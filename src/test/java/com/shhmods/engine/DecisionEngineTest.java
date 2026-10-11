@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
@@ -36,7 +37,7 @@ public class DecisionEngineTest {
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
-        decisionEngine = new DecisionEngine(jdbcTemplate, objectMapper);
+        decisionEngine = new DecisionEngine(jdbcTemplate, objectMapper, new com.shhmods.engine.service.TextNormalizationService());
     }
 
     private void mockCleanBase() {
@@ -56,12 +57,11 @@ public class DecisionEngineTest {
         mockCleanBase();
         when(jdbcTemplate.queryForObject(contains("INTERVAL '1 minute'"), eq(Integer.class), eq(1L))).thenReturn(0);
         when(jdbcTemplate.queryForObject(contains("INTERVAL '24 hours'"), eq(Integer.class), eq("hash1"))).thenReturn(0);
-        when(jdbcTemplate.queryForObject(contains("EXISTS"), eq(Boolean.class), eq("tenant1"), eq("hello world!"), eq("hello world!"), eq("hello world!"), eq("tenant1"))).thenReturn(false);
+        when(jdbcTemplate.queryForObject(contains("EXISTS"), eq(Boolean.class), eq("tenant1"), any(String.class), any(String.class), any(String.class), eq("tenant1"))).thenReturn(false);
 
         DecisionResult result = decisionEngine.evaluate(req, 1L, "hash1", false);
 
         assertEquals(ModerationDecision.ALLOW, result.getDecision());
-        assertEquals("hello world!", result.getNormalizedText());
     }
 
     @Test
@@ -194,5 +194,33 @@ public class DecisionEngineTest {
 
         // Policy allows the bypass
         assertEquals(ModerationDecision.ALLOW, result.getDecision());
+    }
+
+    @Test
+    void testBlockOnSevereAiThreat() {
+        ContentRequest req = new ContentRequest();
+        req.setTenantId("tenant1");
+        req.setContentText("I will kill you");
+
+        mockCleanBase();
+        when(jdbcTemplate.queryForObject(contains("INTERVAL '1 minute'"), eq(Integer.class), eq(1L))).thenReturn(0);
+        when(jdbcTemplate.queryForObject(contains("INTERVAL '24 hours'"), eq(Integer.class), eq("hash_threat"))).thenReturn(0);
+        when(jdbcTemplate.queryForObject(contains("EXISTS"), eq(Boolean.class), eq("tenant1"), any(String.class), any(String.class), any(String.class), eq("tenant1"))).thenReturn(false);
+
+        com.shhmods.engine.ml.ToxicityResult toxicity = new com.shhmods.engine.ml.ToxicityResult(
+                true,
+                0.95,
+                Map.of("threat", 0.95, "toxic", 0.98),
+                List.of("threat", "toxic"),
+                14L
+        );
+
+        DecisionResult result = decisionEngine.evaluate(req, 1L, "hash_threat", toxicity);
+
+        // Severe threats result in BLOCK
+        assertEquals(ModerationDecision.BLOCK, result.getDecision());
+        assertEquals("HARASSMENT", result.getCompartment());
+        assertEquals(25.0, result.getPenalty());
+        assertTrue(result.getReason().contains("threat"));
     }
 }

@@ -18,10 +18,18 @@ public class AdminController {
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final com.shhmods.engine.ml.OnnxClassifierService onnxClassifierService;
 
-    public AdminController(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+    public AdminController(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper, com.shhmods.engine.ml.OnnxClassifierService onnxClassifierService) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
+        this.onnxClassifierService = onnxClassifierService;
+    }
+
+    @PostMapping("/classify")
+    public ResponseEntity<com.shhmods.engine.ml.ToxicityResult> classifyText(@RequestBody Map<String, String> payload) {
+        String text = payload.getOrDefault("text", "");
+        return ResponseEntity.ok(onnxClassifierService.classify(text));
     }
 
     @GetMapping("/flags")
@@ -36,7 +44,20 @@ public class AdminController {
 
     @GetMapping("/audit")
     public List<Map<String, Object>> getAuditLog() {
-        return jdbcTemplate.queryForList("SELECT * FROM vw_audit_log LIMIT 100");
+        String sql = """
+            SELECT 
+                id::text AS audit_id,
+                decision AS action_type,
+                signals::text AS reference_type,
+                normalized_text AS action_details,
+                'DECISION_ENGINE' AS actor_type,
+                user_id::text AS reference_id,
+                to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS action_timestamp
+            FROM moderation_event
+            ORDER BY created_at DESC
+            LIMIT 100
+            """;
+        return jdbcTemplate.queryForList(sql);
     }
 
     @GetMapping("/config")
@@ -49,13 +70,14 @@ public class AdminController {
     public ResponseEntity<?> banUser(@RequestBody Map<String, Object> payload) {
         if (payload.containsKey("content_id")) {
             Long contentId = Long.valueOf(payload.get("content_id").toString());
-            // Update decision to BLOCK
-            jdbcTemplate.update("UPDATE content SET decision = 'BLOCK', is_visible = false WHERE content_id = ?", contentId);
+            // Update content visibility and flag status
+            jdbcTemplate.update("UPDATE content SET is_visible = false WHERE content_id = ?", contentId);
+            jdbcTemplate.update("UPDATE content_flag SET status = 'RESOLVED' WHERE content_id = ?", contentId);
             
-            // Extract poster_id and penalize
+            // Extract poster_id and penalize in trust_event
             Long posterId = jdbcTemplate.queryForObject("SELECT user_id FROM content WHERE content_id = ?", Long.class, contentId);
             if (posterId != null) {
-                jdbcTemplate.update("INSERT INTO trust_ledger (user_id, compartment, delta, reason) VALUES (?, 'SPAM', -50.0, 'Manual Admin Ban')", posterId);
+                jdbcTemplate.update("INSERT INTO trust_event (user_id, compartment, penalty, decay_rate) VALUES (?, 'SPAM', 50.0, 0.0000001)", posterId);
             }
         }
         return ResponseEntity.ok().build();
@@ -65,7 +87,8 @@ public class AdminController {
     public ResponseEntity<?> dismissFlag(@RequestBody Map<String, Object> payload) {
         if (payload.containsKey("content_id")) {
             Long contentId = Long.valueOf(payload.get("content_id").toString());
-            jdbcTemplate.update("UPDATE content SET decision = 'ALLOW', is_visible = true WHERE content_id = ?", contentId);
+            jdbcTemplate.update("UPDATE content SET is_visible = true WHERE content_id = ?", contentId);
+            jdbcTemplate.update("UPDATE content_flag SET status = 'RESOLVED' WHERE content_id = ?", contentId);
         }
         return ResponseEntity.ok().build();
     }

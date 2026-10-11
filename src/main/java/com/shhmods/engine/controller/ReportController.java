@@ -19,9 +19,32 @@ public class ReportController {
 
     @PostMapping
     public Map<String, String> reportContent(@RequestBody Map<String, Object> payload) {
-        Long contentId = Long.valueOf(payload.get("content_id").toString());
-        Long reporterId = Long.valueOf(payload.get("reporter_id").toString());
-        String reason = payload.get("reason").toString();
+        Object rawContentId = payload.containsKey("content_id") ? payload.get("content_id") : payload.get("contentId");
+        Object rawReporter = payload.containsKey("reporter_id") ? payload.get("reporter_id") : payload.get("reporterId");
+        Object rawReason = payload.containsKey("reason") ? payload.get("reason") : payload.get("reportReason");
+        String tenantId = payload.getOrDefault("tenant_id", payload.getOrDefault("tenantId", "GLOBAL")).toString();
+
+        if (rawContentId == null || rawReporter == null) {
+            return Map.of("status", "error", "message", "content_id and reporter_id are required");
+        }
+
+        Long contentId = Long.valueOf(rawContentId.toString());
+        String reason = rawReason != null ? rawReason.toString() : "Reported content";
+
+        Long reporterId;
+        try {
+            reporterId = Long.valueOf(rawReporter.toString());
+        } catch (NumberFormatException e) {
+            // It's an external user id (e.g. UUID string from simulator). Ensure user exists in users table:
+            String userSql = """
+                INSERT INTO users (tenant_id, external_user_id, username, email)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (tenant_id, external_user_id) DO UPDATE SET username = EXCLUDED.username
+                RETURNING user_id
+                """;
+            reporterId = jdbcTemplate.queryForObject(userSql, Long.class,
+                tenantId, rawReporter.toString(), "reporter_" + rawReporter.toString().substring(0, Math.min(6, rawReporter.toString().length())), rawReporter.toString() + "@test.com");
+        }
 
         jdbcTemplate.update("INSERT INTO report (content_id, reporter_id, report_reason) VALUES (?, ?, ?)",
                 contentId, reporterId, reason);

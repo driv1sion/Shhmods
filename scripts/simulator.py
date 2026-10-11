@@ -33,7 +33,12 @@ class TrollUser(Persona):
     def __init__(self, tenant_id):
         super().__init__(tenant_id, "Troll")
     def generate_content(self):
-        return f"You all suck! {random.choice(BANNED_WORDS)}"
+        return random.choice([
+            "You are a disgusting idiot, get off this platform and die.",
+            "I will track you down and hurt you.",
+            "Shut up you moron nobody likes you.",
+            f"You all suck! {random.choice(BANNED_WORDS)}"
+        ])
 
 class BotnetUser(Persona):
     def __init__(self, tenant_id):
@@ -74,12 +79,39 @@ def submit_report(persona, content_id):
     except Exception as e:
         logger.error(f"Report failed: {e}")
 
-def run_simulation(duration_minutes=5, botnet_attack=False, brigade_attack=False, test_overrides=False):
+def test_onnx_classifier():
+    logger.info("--- TESTING ONNX ZERO-SHOT TEXT CLASSIFIER ---")
+    test_cases = [
+        ("Clean greeting", "Hello everyone! Wishing everyone a great and productive day."),
+        ("Normal query", "Can someone please help me understand how this feature works?"),
+        ("Insult / Hate", "You are completely useless, nobody wants you on this team, you idiot."),
+        ("Physical threat", "I will hunt you down and kill you and your entire family."),
+        ("Profanity & Slurs", "Shut up you moron, this is absolute trash garbage."),
+    ]
+    for label, text in test_cases:
+        try:
+            resp = requests.post(f"{API_BASE}/admin/classify", json={"text": text}, timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                logger.info(
+                    f"[{label:18}] isToxic: {str(data.get('isToxic')):5} | Score: {data.get('toxicityScore', 0):.4f} | "
+                    f"Flagged: {data.get('flaggedCategories', [])} | Latency: {data.get('inferenceTimeMs', 0)}ms"
+                )
+            else:
+                logger.warning(f"[{label}] Classify failed with status {resp.status_code}")
+        except Exception as e:
+            logger.error(f"Classify request error: {e}")
+    logger.info("--- ONNX CLASSIFIER TEST COMPLETE ---\n")
+
+def run_simulation(duration_minutes=5, botnet_attack=False, brigade_attack=False, test_overrides=False, test_onnx=False):
     global_tenant = "GLOBAL"
     custom_tenant = "TENANT_A" # To test overrides
     
+    if test_onnx:
+        test_onnx_classifier()
+
     normal_users = [NormalUser(global_tenant) for _ in range(5)]
-    trolls = [TrollUser(global_tenant) for _ in range(2)]
+    trolls = [TrollUser(global_tenant) for _ in range(3)]
     bots = [BotnetUser(global_tenant) for _ in range(10)] if botnet_attack else []
     
     all_personas = normal_users + trolls
@@ -97,6 +129,11 @@ def run_simulation(duration_minutes=5, botnet_attack=False, brigade_attack=False
         time.sleep(1)
 
     while datetime.datetime.now() < end_time:
+        # Rotate user ids periodically to simulate realistic user traffic and avoid hitting fixed-window burst locks
+        if random.random() < 0.3:
+            for p in all_personas:
+                p.user_id = str(uuid.uuid4())
+
         # 2. Botnet Spam Attack (Tests Content Clusters / Burst Limits)
         if botnet_attack and random.random() < 0.2:
             logger.info("--- BOTNET SWARM ATTACK INITIATED ---")
@@ -129,6 +166,7 @@ if __name__ == "__main__":
     parser.add_argument("--botnet", action="store_true", help="Test content clustering & spam")
     parser.add_argument("--brigade", action="store_true", help="Test coordination clusters (mass reports)")
     parser.add_argument("--overrides", action="store_true", help="Test tenant policy overrides")
+    parser.add_argument("--onnx", action="store_true", help="Test ONNX zero-shot text classification directly")
     args = parser.parse_args()
     
-    run_simulation(args.duration, args.botnet, args.brigade, args.overrides)
+    run_simulation(args.duration, args.botnet, args.brigade, args.overrides, args.onnx)

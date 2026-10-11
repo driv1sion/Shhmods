@@ -47,10 +47,10 @@ public class ContentService {
         String hash = generateHash(request.getContentText());
 
         // 3. AI Classifier
-        boolean isToxic = onnxClassifierService.isToxic(request.getContentText());
+        com.shhmods.engine.ml.ToxicityResult toxicityResult = onnxClassifierService.classify(request.getContentText());
 
         // 4. Decision Engine Evaluation
-        DecisionResult result = decisionEngine.evaluate(request, userId, hash, isToxic);
+        DecisionResult result = decisionEngine.evaluate(request, userId, hash, toxicityResult);
 
         // 5. If THROTTLE or BLOCK, we might not even insert content, or we insert it as hidden.
         // As per the roadmap, "observe -> throttle -> hide -> suspend". We still store it if it's REVIEW or ALLOW,
@@ -93,6 +93,16 @@ public class ContentService {
                 VALUES (?, ?, ?, ?)
                 """;
             jdbcTemplate.update(trustSql, userId, result.getCompartment(), result.getPenalty(), result.getDecayRate());
+        }
+
+        // 6.6 Record Flag if content is flagged for review or blocked
+        if (contentId != null && (result.getDecision() == ModerationDecision.REVIEW || result.getDecision() == ModerationDecision.BLOCK)) {
+            String flagSql = """
+                INSERT INTO content_flag (content_id, flag_type, reason, status)
+                VALUES (?, ?, ?, 'PENDING')
+                """;
+            String flagType = Boolean.TRUE.equals(result.getSignals().get("onnx_toxic")) ? "AI_TOXICITY" : "RULE_MATCH";
+            jdbcTemplate.update(flagSql, contentId, flagType, result.getReason());
         }
 
         // 7. Transactional Outbox 

@@ -74,8 +74,19 @@ public class DecisionEngine {
     }
 
     public DecisionResult evaluate(ContentRequest request, Long userId, String contentHash, boolean isToxic) {
+        return evaluate(request, userId, contentHash, new com.shhmods.engine.ml.ToxicityResult(isToxic, isToxic ? 1.0 : 0.0, Map.of(), isToxic ? List.of("toxic") : List.of(), 0L));
+    }
+
+    public DecisionResult evaluate(ContentRequest request, Long userId, String contentHash, com.shhmods.engine.ml.ToxicityResult toxicity) {
         Map<String, Object> signals = new HashMap<>();
+        boolean isToxic = toxicity != null && toxicity.isToxic();
         signals.put("onnx_toxic", isToxic);
+        if (toxicity != null) {
+            signals.put("onnx_toxicity_score", toxicity.toxicityScore());
+            signals.put("onnx_categories", toxicity.categoryScores());
+            signals.put("onnx_flagged_categories", toxicity.flaggedCategories());
+            signals.put("onnx_inference_time_ms", toxicity.inferenceTimeMs());
+        }
 
         Double spamTrust = getTrustScore(userId, "SPAM");
         Double coordTrust = getTrustScore(userId, "COORDINATION");
@@ -187,8 +198,18 @@ public class DecisionEngine {
 
         if (isToxic) {
             if (!canBypass("AI_TOXICITY", policies, spamTrust, accountAgeDays)) {
-                return new DecisionResult(ModerationDecision.REVIEW, "AI flagged as toxic", signals, 1, normalizedText)
-                    .withTrustPenalty("HARASSMENT", 10.0, 0.000001);
+                @SuppressWarnings("unchecked")
+                List<String> flagged = (List<String>) signals.get("onnx_flagged_categories");
+                String reason = (flagged != null && !flagged.isEmpty() && !(flagged.size() == 1 && flagged.contains("toxic")))
+                        ? "AI flagged as toxic (" + String.join(", ", flagged) + ")"
+                        : "AI flagged as toxic";
+
+                boolean isSevere = flagged != null && (flagged.contains("threat") || flagged.contains("severe_toxic"));
+                double penalty = isSevere ? 25.0 : 10.0;
+                ModerationDecision decision = isSevere ? ModerationDecision.BLOCK : ModerationDecision.REVIEW;
+
+                return new DecisionResult(decision, reason, signals, 1, normalizedText)
+                    .withTrustPenalty("HARASSMENT", penalty, 0.000001);
             }
         }
 

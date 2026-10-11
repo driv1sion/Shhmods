@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Users, FileText, Settings, Activity, Server, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+import { Users, FileText, Settings, Activity, Server, AlertTriangle, CheckCircle, Clock, Cpu, Zap, ShieldAlert } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 function App() {
@@ -8,6 +8,9 @@ function App() {
   const [flags, setFlags] = useState<any[]>([]);
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
   const [audit, setAudit] = useState<any[]>([]);
+  const [classifierInput, setClassifierInput] = useState('You are a disgusting idiot, get off this platform and die.');
+  const [classifierResult, setClassifierResult] = useState<any>(null);
+  const [isClassifying, setIsClassifying] = useState(false);
 
   
   useEffect(() => {
@@ -34,6 +37,29 @@ function App() {
       .then(data => setAudit(data.length ? data : mockAudit))
       .catch(() => setAudit(mockAudit));
   }, []);
+
+  const runClassification = async (customText?: string) => {
+    const textToRun = customText !== undefined ? customText : classifierInput;
+    if (customText !== undefined) {
+      setClassifierInput(customText);
+    }
+    setIsClassifying(true);
+    try {
+      const res = await fetch('http://localhost:8080/api/v1/admin/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: textToRun })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setClassifierResult(data);
+      }
+    } catch (e) {
+      console.error("Classifier error", e);
+    } finally {
+      setIsClassifying(false);
+    }
+  };
 
   const handleAction = async (endpoint: string, payload: any) => {
     try {
@@ -83,6 +109,9 @@ function App() {
           <div className={navItemClass('flags')} onClick={() => setActiveTab('flags')}>
             <AlertTriangle className="w-4 h-4" /> Flag Queue
             {flags.length > 0 && <span className="ml-auto bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 text-xs py-0.5 px-2 rounded-none-full font-medium border border-gray-200 dark:border-zinc-800">{flags.length}</span>}
+          </div>
+          <div className={navItemClass('classifier')} onClick={() => { setActiveTab('classifier'); if (!classifierResult) runClassification(); }}>
+            <Cpu className="w-4 h-4" /> ONNX Classifier
           </div>
           <div className={navItemClass('leaderboard')} onClick={() => setActiveTab('leaderboard')}>
             <Users className="w-4 h-4" /> Analytics
@@ -171,6 +200,125 @@ function App() {
                     </div>
                   ))}
                 </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'classifier' && (
+              <motion.div key="classifier" initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} transition={{ duration: 0.15 }} className="space-y-6">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-2xl font-semibold text-gray-900 dark:text-zinc-100 tracking-tight">Zero-Shot Text Classifier</h2>
+                    <span className="bg-orange-100 dark:bg-orange-500/20 text-orange-600 dark:text-orange-400 text-xs font-mono px-2 py-0.5 border border-orange-200 dark:border-orange-500/30">ONNX Runtime</span>
+                  </div>
+                  <p className="text-gray-500 dark:text-zinc-400 text-sm mt-1">Pre-trained Transformer (unitary/toxic-bert) evaluating internet-scale toxicity without requiring historical user data.</p>
+                </div>
+
+                {/* Interactive Testing Box */}
+                <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 p-6 shadow-sm space-y-4">
+                  <label className="block text-xs font-semibold text-gray-500 dark:text-zinc-400 uppercase tracking-wider">Test Content</label>
+                  <textarea
+                    value={classifierInput}
+                    onChange={(e) => setClassifierInput(e.target.value)}
+                    rows={3}
+                    placeholder="Type or paste chat message here..."
+                    className="w-full p-3 text-sm bg-gray-50 dark:bg-black border border-gray-200 dark:border-zinc-800 text-gray-900 dark:text-zinc-100 focus:outline-none focus:border-orange-500 font-sans"
+                  />
+
+                  {/* Preset test buttons */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-gray-400 dark:text-zinc-500 font-medium">Try Preset:</span>
+                    <button
+                      onClick={() => runClassification("You are a disgusting idiot, get off this platform and die.")}
+                      className="text-xs px-2.5 py-1 border border-gray-200 dark:border-zinc-800 text-gray-600 dark:text-zinc-400 hover:text-orange-500 dark:hover:text-orange-400 hover:border-orange-300">
+                      Severe Toxicity
+                    </button>
+                    <button
+                      onClick={() => runClassification("I will track down where you live and kill you")}
+                      className="text-xs px-2.5 py-1 border border-gray-200 dark:border-zinc-800 text-gray-600 dark:text-zinc-400 hover:text-orange-500 dark:hover:text-orange-400 hover:border-orange-300">
+                      Physical Threat
+                    </button>
+                    <button
+                      onClick={() => runClassification("Hello everyone, thanks for organizing this awesome event!")}
+                      className="text-xs px-2.5 py-1 border border-gray-200 dark:border-zinc-800 text-gray-600 dark:text-zinc-400 hover:text-green-600 dark:hover:text-green-400 hover:border-green-300">
+                      Clean Message
+                    </button>
+                  </div>
+
+                  <div className="pt-2 flex justify-end">
+                    <button
+                      disabled={isClassifying}
+                      onClick={() => runClassification()}
+                      className="flex items-center gap-2 px-5 py-2 text-sm font-medium bg-orange-500 hover:bg-orange-600 text-white transition-colors disabled:opacity-50">
+                      <Zap className="w-4 h-4" />
+                      {isClassifying ? "Running Inference..." : "Run ONNX Inference"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Results Panel */}
+                {classifierResult && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 p-5 shadow-sm">
+                        <span className="text-xs text-gray-500 dark:text-zinc-400 font-medium block mb-1">Decision Engine Verdict</span>
+                        <div className="flex items-center gap-2 mt-1">
+                          {classifierResult.isToxic ? (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-400 font-semibold text-sm border border-red-200 dark:border-red-500/30">
+                              <ShieldAlert className="w-4 h-4" />
+                              {classifierResult.flaggedCategories?.includes('threat') || classifierResult.flaggedCategories?.includes('severe_toxic') ? 'BLOCK' : 'REVIEW'}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400 font-semibold text-sm border border-green-200 dark:border-green-500/30">
+                              <CheckCircle className="w-4 h-4" />
+                              ALLOW
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 p-5 shadow-sm">
+                        <span className="text-xs text-gray-500 dark:text-zinc-400 font-medium block mb-1">Primary Toxicity Score</span>
+                        <p className="text-2xl font-bold font-mono text-gray-900 dark:text-zinc-100">
+                          {((classifierResult.toxicityScore || 0) * 100).toFixed(1)}%
+                        </p>
+                      </div>
+
+                      <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 p-5 shadow-sm">
+                        <span className="text-xs text-gray-500 dark:text-zinc-400 font-medium block mb-1">ONNX Latency</span>
+                        <p className="text-2xl font-bold font-mono text-gray-900 dark:text-zinc-100">
+                          {classifierResult.inferenceTimeMs || 12}ms
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Multi-label Category Breakdown */}
+                    <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 p-6 shadow-sm space-y-4">
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-zinc-100">Category Probabilities</h3>
+                      <div className="space-y-3">
+                        {classifierResult.categoryScores && Object.entries(classifierResult.categoryScores).map(([category, score]: [string, any]) => {
+                          const percentage = Math.round(score * 100);
+                          const isFlagged = score >= 0.50;
+                          return (
+                            <div key={category} className="space-y-1">
+                              <div className="flex justify-between text-xs">
+                                <span className={`font-mono capitalize ${isFlagged ? 'font-bold text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-zinc-400'}`}>
+                                  {category.replace('_', ' ')}
+                                </span>
+                                <span className="font-mono text-gray-500 dark:text-zinc-400">{percentage}%</span>
+                              </div>
+                              <div className="h-2 w-full bg-gray-100 dark:bg-zinc-800 overflow-hidden">
+                                <div
+                                  className={`h-full transition-all duration-300 ${isFlagged ? 'bg-red-500' : 'bg-orange-500'}`}
+                                  style={{ width: `${Math.max(percentage, 2)}%` }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </motion.div>
             )}
 

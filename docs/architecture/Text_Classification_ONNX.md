@@ -1,16 +1,16 @@
-# Zero-Shot ONNX Text Classification Engine
+# Local Multi-Label Transformer Classification Engine
 
-Shhmods integrates local, pre-trained transformer inference directly into the moderation decision pipeline using the **Microsoft ONNX Runtime** in Java. 
+Shhmods integrates local transformer inference directly into the moderation decision pipeline using the **Microsoft ONNX Runtime** in Java. 
 
-Unlike external moderation APIs (OpenAI, Perspective API) that introduce prohibitive subscription fees, network hops, rate limits, and third-party data privacy concerns, Shhmods executes inference **zero-shot**, entirely on-premise within the containerized backend in ~10–15ms.
+Unlike external moderation APIs (OpenAI, Perspective API) that introduce subscription fees, network hops, rate limits, and third-party data privacy concerns, Shhmods executes supervised inference entirely on-premise within the containerized backend.
 
 ---
 
-## 1. Zero-Shot Pre-Trained Architecture
+## 1. Pre-Trained Supervised Transformer Architecture
 
-Content moderation models do not require user-specific training data to understand abusive language, hate speech, threats, or harassment. Shhmods utilizes a pre-trained **`unitary/toxic-bert`** transformer model (INT8 quantized, ~106MB), trained on millions of toxic comments from Wikipedia and Civil Comments.
+Content moderation models do not require user-specific training data to understand abusive language, hate speech, threats, or harassment. Shhmods utilizes a pre-trained **`unitary/toxic-bert`** transformer model (INT8 quantized, ~106MB), trained in a supervised multi-label setting on millions of toxic comments from Wikipedia and Civil Comments.
 
-Because the underlying representation encodes universal internet toxicity patterns, the model works **zero-shot out of the box** on any community chat or forum payload without prior fine-tuning.
+Because the underlying representation encodes internet toxicity patterns, the model generalizes effectively out of the box across common community forum and chat text without requiring custom fine-tuning.
 
 ### Multi-Label Toxicity Head
 

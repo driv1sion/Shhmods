@@ -13,7 +13,6 @@ public class ContentRequest {
     @NotBlank
     private String username;
     
-    @NotBlank
     private String email;
     
     @NotBlank

@@ -1,152 +1,191 @@
-# Shhmods: Orchestrated Moderation Engine
+# Shhmods: Adaptive & Explainable Moderation Decision Engine
 
-Shhmods is a lightweight, fully open-source digital content moderation system designed to be seamlessly integrated into external communities (Discord bots, games, forums). 
+Shhmods is an open-source, self-hosted moderation decision engine designed to detect coordinated abuse, adapt enforcement to risk, and make automated decisions auditable, appealable, and counterfactually testable.
 
-It automates text moderation and dynamically computes user trust scores directly through a robust **Spring Boot Orchestration Engine** backed by **Advanced PostgreSQL Analytics**, avoiding the need for expensive, opaque external machine learning APIs.
+Rather than acting as another generic classification wrapper, Shhmods combines **behavioral signals**, **temporal coordination graph analytics**, and **deterministic policy evaluation** to distinguish isolated rule violations from organized campaigns without over-censoring innocent users.
 
-## The Problem
+---
 
-Traditional content moderation relies heavily on costly external ML APIs (like OpenAI or Perspective API) which introduces latency, high operational costs, and "black box" moderation decisions that are difficult to appeal. Simple keyword filters are easily bypassed using leetspeak (e.g., `b@dw0rd`), and static point-based reputation systems require constant manual admin intervention. Furthermore, sophisticated botnets easily bypass rate limits by coordinating swarm attacks.
+## The Core Problem
 
-## The Solution
+Traditional content moderation suffers from three fundamental failure modes:
 
-Shhmods solves this by combining the **explainability of a deterministic rules engine** with the **nuance of human forgiveness** and the **scale of graph analytics**. It executes complex moderation workflows entirely within your own infrastructure in milliseconds.
+1. **Context Blindness & Over-Enforcement:** Standalone toxicity classifiers score text in isolation, frequently punishing legitimate users for quoting, reclaimed slang, sarcasm, or heated but non-coordinated disagreements.
+2. **Evasion by Distributed Swarms:** Organized attackers bypass keyword filters and per-account rate limits by rotating accounts, paraphrasing text, and coordinating bursts across multiple targets.
+3. **Opaque & Irreversible Enforcement:** Decisions made by third-party black-box APIs or brittle rules are difficult to debug, audit, or appeal. Administrators cannot simulate policy changes before deploying them to live communities.
 
-## High-Level Architecture (HLD)
+---
+
+## Core Principles
+
+- **Moderate behavior, not just text:** An isolated offensive term from a veteran user requires different handling than a synchronized swarm of new accounts targeting a single individual.
+- **Apply least-restrictive enforcement:** Enforcement actions reflect risk and uncertainty (`ALLOW`, `ALLOW_WITH_MONITORING`, `RATE_LIMIT`, `REVIEW`, `BLOCK`, `ESCALATE`) rather than binary permanent punishments.
+- **Make every decision explainable, reversible, and measurable:** Every decision records an immutable snapshot of all active signals at evaluation time. Erroneous decisions can be reversed on appeal, and policies can be counterfactually simulated against historical traffic.
+
+---
+
+## Architecture: Fast Path vs. Analytical Path
+
+Shhmods separates the latency-critical synchronous decision path from asynchronous behavioral and graph analytics to ensure responsive throughput under load.
 
 ```mermaid
 flowchart TD
-    Client[External Client / Forum] -->|POST /api/v1/content| API[Spring Boot REST API]
-    API -->|Bucket4j Rate Limiting| Filter[Volumetric DDoS Filter]
-    Filter --> ContentService[Content Service]
+    Client[External Client / Forum / Discord] -->|POST /api/v1/content with Idempotency-Key| API[Ingestion API]
     
-    ContentService -->|Normalizes Text| Normalizer[Text Normalization Service]
-    ContentService -->|Evaluates Zero-Shot| ONNX[ONNX Transformer Runtime]
-    ContentService -->|Passes Signals & ML Result| DecisionEngine[Decision Engine]
-    
-    subgraph PostgreSQL Analytics
-        DecisionEngine -.->|Queries| Trust[Effective Trust Decay View]
-        DecisionEngine -.->|Queries| Graph[Graph Coordination Clusters]
-        DecisionEngine -.->|Queries| Policy[Tenant Overrides]
-    end
-    
-    DecisionEngine -->|Returns Decision| ContentService
-    
-    subgraph Transactional Commit
-        ContentService -->|Writes| Content[Content Table]
-        ContentService -->|Writes Decisions & ML Signals| Ledger[Immutable Moderation Ledger]
-        ContentService -->|Writes| TrustEvent[Append-Only Trust Event]
-        ContentService -->|Flags Content| FlagQueue[Content Flag Review Queue]
-        ContentService -->|Writes| Outbox[Outbox Event]
-    end
-
-    subgraph Async Background Workers
-        Outbox -->|SELECT ... FOR UPDATE SKIP LOCKED| OutboxWorker[Spring Outbox Worker]
-        OutboxWorker -->|Notifications| Webhook[Webhook Dispatcher]
+    subgraph Synchronous Fast-Path [Low Latency]
+        API --> Normalizer[Text Normalization & Fast Rules]
+        API --> ONNX[Local Transformer Toxicity Classifier]
+        API --> CacheRead[Read Cached User Risk & Trust Snapshot]
         
-        Graph -->|REFRESH MATERIALIZED VIEW| GraphWorker[Graph Coordination Worker]
+        Normalizer --> Aggregator[Signal Aggregator]
+        ONNX --> Aggregator
+        CacheRead --> Aggregator
+        
+        Aggregator --> Snapshot[Immutable Signal Snapshot]
+        Snapshot --> PolicyEngine[Deterministic Policy Evaluator]
+        PolicyEngine --> Decision[Calibrated Action & Reason Codes]
+        
+        Decision --> DBTx[Database Transaction]
+        subgraph DB Commit
+            DBTx --> Content[Content Store]
+            DBTx --> Ledger[Tamper-Evident Decision Ledger]
+            DBTx --> Outbox[Transactional Outbox]
+        end
     end
     
-    AdminUI[React + TS Admin Dashboard] -->|GET /api/v1/admin/*| API
-    AdminUI -->|POST /api/v1/admin/classify| ONNX
+    Decision --> APIResponse[HTTP Moderation Response]
+
+    subgraph Asynchronous Analytical Path [Background Workers]
+        Outbox --> OutboxWorker[Outbox Event Worker]
+        OutboxWorker --> Webhook[Webhook Dispatcher]
+        
+        Content --> TemporalWorker[Temporal Burst & Coordination Worker]
+        Content --> SemanticWorker[Semantic Similarity & Cluster Analysis]
+        
+        TemporalWorker --> IncidentEngine[Coordination Incident Engine]
+        SemanticWorker --> IncidentEngine
+        
+        IncidentEngine --> SnapshotUpdate[Update Behavioral Risk Snapshots]
+        SnapshotUpdate --> CacheRead
+    end
 ```
 
-## Key Features & Technical Details
+---
 
-### 1. Zero-Shot ONNX Text Classification (Pre-Trained Transformer)
-- **Why?** Eliminates expensive external cloud APIs (OpenAI, Perspective API) and eliminates the need for user training data.
-- **Implementation**: Uses **Microsoft ONNX Runtime** in Java with a bundled, pre-trained `unitary/toxic-bert` model (INT8 quantized, ~106MB) and a pure-Java WordPiece `BertTokenizer`.
-- **Zero-Shot Out of the Box**: Pre-trained on millions of toxic comments from Wikipedia and Civil Comments. Instantly detects internet toxicity, obscenity, slurs, insults, and violent threats in ~10–15ms without having seen your users before.
-- **Multi-Label Explanations**: Produces probabilities across 6 dimensions (`toxic`, `severe_toxic`, `obscene`, `threat`, `insult`, `identity_hate`) logged directly to the decision ledger. Violent threats trigger immediate `BLOCK` and severe trust deductions.
+## Distinctive Features
 
-### 2. Orchestrated Decision Engine
-- **Why?** Moderation requires deep context. The Spring Boot engine analyzes user history, burst rates, ML toxicity scores, and trust levels before making a decision.
-- **Explainability**: Every action (ALLOW, REVIEW, BLOCK) is committed to an immutable `moderation_event` ledger containing the exact signals (e.g., `{"onnx_toxic": true, "onnx_toxicity_score": 0.98, "spam_trust": 15.0, "burst_1m": 4}`) that caused the outcome.
-- **Fuzzy Matching**: Leverages PostgreSQL `pg_trgm` to calculate trigram similarity, catching leetspeak and obfuscated slurs natively.
+### 1. Multidimensional Behavioral Trust with Uncertainty
+- **Behavior-Specific Dimensions:** Tracks standing independently across `spam`, `harassment`, `coordination`, and `general_abuse`. A user with a clean record who slips in an argument is not treated the same as an affiliate spammer.
+- **Uncertainty & Evidence Counts:** Distinguishes new accounts (high uncertainty, low evidence) from established accounts (calibrated confidence).
+- **Distinguishing Decay from Sustained Good Behavior:** Penalties decay with time, but privilege restoration requires demonstration of sustained legitimate participation, preventing abusive accounts from recovering simply by idling.
 
-### 3. Temporal Trust Decay
-- **Why?** People make mistakes. Trust should be lost instantly but regained slowly.
-- **Implementation**: Trust scores are not static integers. Shhmods utilizes an append-only `trust_event` ledger to record penalties. An `effective_trust` PostgreSQL View dynamically computes a user's standing on the fly using **exponential decay** (`exp(-decay_rate * time_delta)`). A user who commits a violation automatically regains privileges as time passes, without admin intervention or cron jobs.
+### 2. Coordination Detection Without Identical Payloads
+- **Beyond Hash Matching:** Attackers easily evade exact-match hashing by changing words or punctuation.
+- **Multi-Signal Graph Clusters:** Evaluates temporal bursts, paraphrased semantic similarity, shared target concentration, and account creation patterns.
+- **Structured Campaign Evidence:** Decisions return explicit, interpretable evidence (e.g., `18 accounts targeted victim X within 40s with 85% semantic alignment`) instead of opaque flags.
 
-### 4. Graph-Based Coordination Detection
-- **Why?** Malicious users create botnets to swarm communities with identical spam or mass-report innocent users (Brigading).
-- **Implementation**: Asynchronous Spring workers maintain materialized views (`coordination_clusters` and `content_clusters`). If the database detects graph edges forming between users posting identical payload hashes or targeting the same victims, the Decision Engine intercepts their next requests and applies massive coordination penalties.
+### 3. Deterministic Policy Replay & Counterfactual Simulation
+- **Decoupled Signals and Policies:** Evaluated signals are stored as immutable snapshots alongside each decision.
+- **Pre-Deployment Policy Testing:** Administrators can replay historical datasets against candidate rules to evaluate false positive reduction, detection recall, and moderator review queue impact before applying changes live.
 
-### 5. Tenant Policy Overrides
-- **Why?** Every community has different tolerances. What is spam in one forum is encouraged in another.
-- **Implementation**: Tenants can inject JSON bypass policies. If a trusted veteran posts a URL or triggers an AI false positive, a tenant policy can intercept the default rule and override it to `ALLOW`, evaluating the user's specific age and trust metrics in milliseconds.
+### 4. Reversible Enforcement & Human-in-the-Loop Appeals
+- **Proportionate Actions:** Supports non-destructive actions including `ALLOW_WITH_MONITORING`, temporary `RATE_LIMIT`, and `REVIEW` hold queues.
+- **Audit & Appeal Loop:** Overturned decisions restore trust standing and flag the historical evidence as contested, ensuring erroneous automated findings do not permanently poison user history.
 
-## How to Use It (Integration Example)
+### 5. Local Multi-Label Transformer Classification
+- **Self-Hosted Inference:** Powered by **Microsoft ONNX Runtime** in Java with a pre-trained multi-label transformer (`unitary/toxic-bert`) and pure-Java WordPiece tokenization.
+- **Model Abstention:** Classifiers output calibrated probabilities across 6 labels (`toxic`, `severe_toxic`, `obscene`, `threat`, `insult`, `identity_hate`). Ambiguous or low-confidence predictions automatically route to human review rather than executing automated sanctions.
 
-Shhmods operates as a headless **Moderation-as-a-Service API**. You do not build your app *inside* Shhmods; instead, your app calls Shhmods whenever users interact.
+---
 
-1. **User Registration:** Create an identity for a user in Shhmods:
-   ```json
-   POST /api/v1/users
-   { "tenant_id": "YOUR_COMMUNITY", "external_user_id": "discord_12345", "username": "troll_slayer", "email": "user@test.com" }
-   ```
+## Integration Example
 
-2. **Content Submission:** Send user messages to Shhmods first:
-   ```json
-   POST /api/v1/content
-   { "tenant_id": "YOUR_COMMUNITY", "external_user_id": "discord_12345", "username": "troll_slayer", "email": "user@test.com", "contentText": "Shut up you moron nobody likes you", "contentType": "CHAT" }
-   ```
+Shhmods operates as a headless Moderation-as-a-Service API. It uses tenant-scoped external IDs and requires **zero personal identifiable information (PII)**:
 
-3. **Enforcement:** Shhmods runs the text through the Decision Engine (evaluating ONNX toxicity, graph clusters, decay models, and tenant overrides). It immediately responds with the moderation decision:
-   ```json
-   { "decision": "REVIEW", "reason": "AI flagged as toxic (toxic, obscene, insult)", "signals": {"onnx_toxic": true, "onnx_toxicity_score": 0.984} }
-   ```
+### 1. Content Submission with Idempotency
+```http
+POST /api/v1/content
+Content-Type: application/json
+Idempotency-Key: req_msg_98412491
 
-## Quickstart & Deployment
+{
+  "tenantId": "gaming_forum",
+  "externalUserId": "discord_84920194",
+  "username": "community_member",
+  "contentText": "Check out this link: http://example.com/item",
+  "contentType": "FORUM_POST"
+}
+```
 
-Shhmods is fully containerized and designed for a 1-click deployment via Docker Compose.
+### 2. Structured Decision Response
+```json
+{
+  "decision": "REVIEW",
+  "reason": "Untrusted account posted external URL under high temporal burst",
+  "reasonCodes": ["UNTRUSTED_USER_URL", "TEMPORAL_BURST_ELEVATED"],
+  "signals": {
+    "accountAgeDays": 1.2,
+    "spamTrust": 45.0,
+    "coordinationRisk": 0.68,
+    "onnxToxicityScore": 0.04
+  },
+  "riskSnapshot": {
+    "version": 420,
+    "freshnessSeconds": 2
+  }
+}
+```
+
+---
+
+## Adversarial Evaluation Lab
+
+Shhmods includes a benchmark harness to empirically compare moderation architectures against controlled workloads:
+
+### Evaluated Baselines:
+1. **Baseline A:** Keyword & Regex Filter
+2. **Baseline B:** Keyword Filter + Per-Account Token Bucket Rate Limiting
+3. **Baseline C:** Supervised Toxicity Classifier + Rate Limiting
+4. **Baseline D:** Shhmods 2.0 (Multidimensional Trust + Coordination Graph + Calibrated Policy)
+
+### Evaluation Scenarios:
+- **Legitimate High-Volume Event:** Synchronized benign discussion (measures false positive resistance).
+- **Isolated Violations:** Single toxic comments (measures classification precision & least-restrictive enforcement).
+- **Account-Rotating Spam:** Distributed spam staying below individual rate limits (measures behavioral clustering).
+- **Paraphrased Swarm Attack:** Coordinated harassment with non-identical text (measures multi-signal campaign detection).
+
+Run the comparative benchmark:
+```bash
+python3 scripts/benchmark.py --scenarios all --compare-baselines
+```
+
+---
+
+## Quickstart & Local Setup
 
 ### Prerequisites
-- **Docker** and **Docker Compose** installed on your host machine.
-- Java 21 to build the local JAR.
+- **Docker & Docker Compose**
+- **Java 21 (JDK)**
+- Python 3.9+ with `requests` (for benchmark suite)
 
-### 1-Click Deploy
-
-1. Download the pre-trained ONNX model from Hugging Face (first-time setup only):
-   ```bash
-   ./scripts/download_models.sh
-   ```
-2. Build the backend JAR locally (bypasses Docker network timeouts):
-   ```bash
-   ./gradlew build -x test
-   ```
-2. Spin up the infrastructure:
-   ```bash
-   docker compose up -d --build
-   ```
-
-This will:
-1. Start a `postgres:15-alpine` database.
-2. Build and start the `shhmods-backend` container (API on port `8080`).
-3. Build and start the `shhmods-frontend` container (React Dashboard on port `80`).
-
-### Run the API Simulator
-
-Want to see the system under load? We provide a Python script that mimics Normal users, Trolls, Botnets, and tests the ONNX zero-shot classifier:
-
+### 1. Setup Models
+Download the ONNX transformer model and tokenizer vocabulary:
 ```bash
-# Requires python3 and requests module
-pip install requests
-
-# 1. Test the ONNX zero-shot classifier directly
-python3 scripts/simulator.py --onnx
-
-# 2. Run simulation with botnet swarm attack
-python3 scripts/simulator.py --duration 2 --botnet
-
-# 3. Full adversarial benchmark (ONNX, botnets, brigades, policy overrides)
-python3 scripts/simulator.py --duration 3 --onnx --botnet --brigade --overrides
+./scripts/download_models.sh
 ```
 
-## Documentation
-For deep dives into the architecture, view the official documentation:
-- [Platform Overview](docs/architecture/Platform_Overview.md)
-- [Zero-Shot ONNX Text Classification](docs/architecture/Text_Classification_ONNX.md)
-- [Trust and Decay Model](docs/architecture/Trust_and_Decay_Model.md)
-- [Graph Coordination Engine](docs/architecture/Graph_Detection_Engine.md)
-- [Tenant Policy Overrides](docs/architecture/Policy_Overrides.md)
+### 2. Build & Verify
+Run tests and build the application artifact:
+```bash
+./gradlew test
+./gradlew build
+```
+
+### 3. Launch Services
+Start PostgreSQL, the Spring Boot engine, and the Admin UI:
+```bash
+docker compose up -d --build
+```
+- **Backend API:** `http://localhost:8080`
+- **Interactive Moderation Debugger (UI):** `http://localhost:80`
+

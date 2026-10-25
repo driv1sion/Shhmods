@@ -23,16 +23,26 @@ public class ContentService {
     private final DecisionEngine decisionEngine;
     private final ObjectMapper objectMapper;
 
-    public ContentService(JdbcTemplate jdbcTemplate, OnnxClassifierService onnxClassifierService, DecisionEngine decisionEngine, ObjectMapper objectMapper) {
+    private final org.springframework.transaction.support.TransactionTemplate transactionTemplate;
+
+    public ContentService(JdbcTemplate jdbcTemplate, 
+                          OnnxClassifierService onnxClassifierService, 
+                          DecisionEngine decisionEngine, 
+                          ObjectMapper objectMapper,
+                          org.springframework.transaction.PlatformTransactionManager transactionManager) {
         this.jdbcTemplate = jdbcTemplate;
         this.onnxClassifierService = onnxClassifierService;
         this.decisionEngine = decisionEngine;
         this.objectMapper = objectMapper;
+        this.transactionTemplate = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
     }
 
-    @Transactional
     public Long createContent(ContentRequest request) {
-        // 1. Ensure User exists
+        // 1. Ensure User exists (reads/upserts outside long-running inference)
+        String email = (request.getEmail() != null && !request.getEmail().isBlank()) 
+            ? request.getEmail() 
+            : request.getExternalUserId() + "@anon.internal";
+
         String userSql = """
             INSERT INTO users (tenant_id, external_user_id, username, email)
             VALUES (?, ?, ?, ?)
@@ -41,33 +51,32 @@ public class ContentService {
             """;
         
         Long userId = jdbcTemplate.queryForObject(userSql, Long.class, 
-            request.getTenantId(), request.getExternalUserId(), request.getUsername(), request.getEmail());
+            request.getTenantId(), request.getExternalUserId(), request.getUsername(), email);
 
         // 2. Hash Content
         String hash = generateHash(request.getContentText());
 
-        // 3. AI Classifier
+        // 3. AI Classifier - EXECUTED OUTSIDE DB TRANSACTION
         com.shhmods.engine.ml.ToxicityResult toxicityResult = onnxClassifierService.classify(request.getContentText());
 
-        // 4. Decision Engine Evaluation
+        // 4. Decision Engine Evaluation - EXECUTED OUTSIDE DB WRITE TRANSACTION
         DecisionResult result = decisionEngine.evaluate(request, userId, hash, toxicityResult);
 
-        // 5. If THROTTLE or BLOCK, we might not even insert content, or we insert it as hidden.
-        // As per the roadmap, "observe -> throttle -> hide -> suspend". We still store it if it's REVIEW or ALLOW,
-        // and we can store it as hidden if BLOCK.
-        boolean isVisible = (result.getDecision() == ModerationDecision.ALLOW || result.getDecision() == ModerationDecision.ALLOW_WITH_MONITORING);
+        // 5. Atomic persistence of Content, Immutable Decision Snapshot, Trust, and Outbox
+        return transactionTemplate.execute(status -> {
+            boolean isVisible = (result.getDecision() == ModerationDecision.ALLOW || result.getDecision() == ModerationDecision.ALLOW_WITH_MONITORING);
 
-        String contentSql = """
-            INSERT INTO content (tenant_id, user_id, content_text, content_type, content_hash, is_visible)
-            VALUES (?, ?, ?, ?, ?, ?)
-            RETURNING content_id
-            """;
-            
-        Long contentId = null;
-        if (result.getDecision() != ModerationDecision.THROTTLE) {
-            contentId = jdbcTemplate.queryForObject(contentSql, Long.class,
-                request.getTenantId(), userId, request.getContentText(), request.getContentType(), hash, isVisible);
-        }
+            String contentSql = """
+                INSERT INTO content (tenant_id, user_id, content_text, content_type, content_hash, is_visible)
+                VALUES (?, ?, ?, ?, ?, ?)
+                RETURNING content_id
+                """;
+                
+            Long contentId = null;
+            if (result.getDecision() != ModerationDecision.THROTTLE) {
+                contentId = jdbcTemplate.queryForObject(contentSql, Long.class,
+                    request.getTenantId(), userId, request.getContentText(), request.getContentType(), hash, isVisible);
+            }
 
         // 6. Record to Ledger (moderation_event)
         String signalsJson = "{}";
@@ -123,12 +132,13 @@ public class ContentService {
         }
         jdbcTemplate.update(outboxSql, "MODERATION_EVENT", eventId.toString(), "DECISION_MADE", outboxPayload);
 
-        // If throttled, throw specific exception or handle in controller
-        if (result.getDecision() == ModerationDecision.THROTTLE) {
-            throw new RuntimeException("Burst rate limit exceeded"); // Handled by controller for 429
-        }
+            // If throttled, throw specific exception or handle in controller
+            if (result.getDecision() == ModerationDecision.THROTTLE) {
+                throw new RuntimeException("Burst rate limit exceeded"); // Handled by controller for 429
+            }
 
-        return contentId;
+            return contentId;
+        });
     }
     
     private String generateHash(String text) {

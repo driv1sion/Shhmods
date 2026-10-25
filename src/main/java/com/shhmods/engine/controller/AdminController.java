@@ -3,10 +3,12 @@ package com.shhmods.engine.controller;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.List;
@@ -19,11 +21,16 @@ public class AdminController {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final com.shhmods.engine.ml.OnnxClassifierService onnxClassifierService;
+    private final com.shhmods.engine.service.ContentService contentService;
 
-    public AdminController(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper, com.shhmods.engine.ml.OnnxClassifierService onnxClassifierService) {
+    public AdminController(JdbcTemplate jdbcTemplate, 
+                           ObjectMapper objectMapper, 
+                           com.shhmods.engine.ml.OnnxClassifierService onnxClassifierService,
+                           com.shhmods.engine.service.ContentService contentService) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.onnxClassifierService = onnxClassifierService;
+        this.contentService = contentService;
     }
 
     @PostMapping("/classify")
@@ -91,6 +98,16 @@ public class AdminController {
             jdbcTemplate.update("UPDATE content_flag SET status = 'RESOLVED' WHERE content_id = ?", contentId);
         }
         return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/content/{id}/redact")
+    public ResponseEntity<?> redactContent(@PathVariable("id") Long id, @RequestBody(required = false) Map<String, String> payload) {
+        String reason = payload != null ? payload.getOrDefault("reason", "Privacy deletion request") : "Privacy deletion request";
+        boolean success = contentService.redactContent(id, reason);
+        if (success) {
+            return ResponseEntity.ok(Map.of("status", "SUCCESS", "message", "Content successfully redacted", "contentId", id));
+        }
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("status", "ERROR", "message", "Content not found"));
     }
 
     @PostMapping("/policy")

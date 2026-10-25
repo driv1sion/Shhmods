@@ -19,9 +19,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.contains;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
@@ -31,17 +29,28 @@ public class DecisionEngineTest {
     @Mock
     private JdbcTemplate jdbcTemplate;
 
+    @Mock
+    private com.shhmods.engine.trust.TrustCalculatorService trustCalculatorService;
+
     private DecisionEngine decisionEngine;
     private ObjectMapper objectMapper;
 
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
-        decisionEngine = new DecisionEngine(jdbcTemplate, objectMapper, new com.shhmods.engine.service.TextNormalizationService());
+        decisionEngine = new DecisionEngine(jdbcTemplate, objectMapper, new com.shhmods.engine.service.TextNormalizationService(), trustCalculatorService);
     }
 
     private void mockCleanBase() {
-        lenient().when(jdbcTemplate.queryForObject(contains("current_trust"), eq(Double.class), any(Long.class), any(String.class))).thenReturn(100.0);
+        com.shhmods.engine.trust.UserTrustProfile cleanProfile = new com.shhmods.engine.trust.UserTrustProfile(
+            1L, "tenant1",
+            new com.shhmods.engine.trust.TrustDimension("SPAM", 20.0, 0.0),
+            new com.shhmods.engine.trust.TrustDimension("HARASSMENT", 20.0, 0.0),
+            new com.shhmods.engine.trust.TrustDimension("COORDINATION", 20.0, 0.0),
+            new com.shhmods.engine.trust.TrustDimension("GENERAL_ABUSE", 20.0, 0.0),
+            java.time.Instant.now(), java.time.Instant.now()
+        );
+        lenient().when(trustCalculatorService.getProfile(anyLong(), anyString())).thenReturn(cleanProfile);
         lenient().when(jdbcTemplate.queryForObject(contains("burst_limit"), eq(Integer.class), any(String.class))).thenReturn(5);
         lenient().when(jdbcTemplate.queryForObject(contains("content_clusters"), eq(Integer.class), eq(1L), eq(1L))).thenReturn(0);
         lenient().when(jdbcTemplate.queryForObject(contains("account_created_at"), eq(Double.class), any(Long.class))).thenReturn(50.0);
@@ -71,13 +80,21 @@ public class DecisionEngineTest {
         req.setContentText("Hello world!");
 
         mockCleanBase();
-        // Mock low spam trust score (15.0)
-        when(jdbcTemplate.queryForObject(contains("current_trust"), eq(Double.class), eq(1L), eq("SPAM"))).thenReturn(15.0);
+        // Mock low spam trust score (< 25.0) with calibrated confidence
+        com.shhmods.engine.trust.UserTrustProfile lowTrust = new com.shhmods.engine.trust.UserTrustProfile(
+            1L, "tenant1",
+            new com.shhmods.engine.trust.TrustDimension("SPAM", 2.0, 20.0),
+            new com.shhmods.engine.trust.TrustDimension("HARASSMENT", 20.0, 0.0),
+            new com.shhmods.engine.trust.TrustDimension("COORDINATION", 20.0, 0.0),
+            new com.shhmods.engine.trust.TrustDimension("GENERAL_ABUSE", 20.0, 0.0),
+            java.time.Instant.now(), java.time.Instant.now()
+        );
+        when(trustCalculatorService.getProfile(eq(1L), anyString())).thenReturn(lowTrust);
 
         DecisionResult result = decisionEngine.evaluate(req, 1L, "hash1", false);
 
         assertEquals(ModerationDecision.BLOCK, result.getDecision());
-        assertEquals("User trust score too low", result.getReason());
+        assertEquals("User behavioral trust score too low", result.getReason());
     }
 
     @Test
@@ -180,8 +197,16 @@ public class DecisionEngineTest {
         when(jdbcTemplate.queryForObject(contains("INTERVAL '24 hours'"), eq(Integer.class), eq("hash_url"))).thenReturn(0);
         when(jdbcTemplate.queryForObject(contains("EXISTS"), eq(Boolean.class), eq("tenant1"), any(String.class), any(String.class), any(String.class), eq("tenant1"))).thenReturn(false);
 
-        // The user has a slightly low spam trust (70 < 80) which normally triggers URL block
-        when(jdbcTemplate.queryForObject(contains("current_trust"), eq(Double.class), eq(1L), eq("SPAM"))).thenReturn(70.0);
+        // The user has a slightly low spam trust (70% < 80%) which triggers URL review gating without policy
+        com.shhmods.engine.trust.UserTrustProfile urlUser = new com.shhmods.engine.trust.UserTrustProfile(
+            1L, "tenant1",
+            new com.shhmods.engine.trust.TrustDimension("SPAM", 7.0, 3.0),
+            new com.shhmods.engine.trust.TrustDimension("HARASSMENT", 20.0, 0.0),
+            new com.shhmods.engine.trust.TrustDimension("COORDINATION", 20.0, 0.0),
+            new com.shhmods.engine.trust.TrustDimension("GENERAL_ABUSE", 20.0, 0.0),
+            java.time.Instant.now(), java.time.Instant.now()
+        );
+        when(trustCalculatorService.getProfile(eq(1L), anyString())).thenReturn(urlUser);
 
         // But we inject a policy to bypass it if account age > 30 and spam trust > 50
         Map<String, Object> policyRow = new HashMap<>();

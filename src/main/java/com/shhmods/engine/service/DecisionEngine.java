@@ -6,6 +6,8 @@ import com.shhmods.engine.dto.ContentRequest;
 import com.shhmods.engine.dto.DecisionResult;
 import com.shhmods.engine.dto.ModerationDecision;
 import com.shhmods.engine.dto.TenantPolicyDto;
+import com.shhmods.engine.trust.TrustCalculatorService;
+import com.shhmods.engine.trust.UserTrustProfile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -20,22 +22,20 @@ public class DecisionEngine {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final TextNormalizationService normalizer;
+    private final TrustCalculatorService trustCalculatorService;
 
-    public DecisionEngine(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper, TextNormalizationService normalizer) {
+    public DecisionEngine(JdbcTemplate jdbcTemplate, 
+                          ObjectMapper objectMapper, 
+                          TextNormalizationService normalizer,
+                          TrustCalculatorService trustCalculatorService) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.normalizer = normalizer;
+        this.trustCalculatorService = trustCalculatorService;
     }
 
-    private Double getTrustScore(Long userId, String compartment) {
-        try {
-            Double score = jdbcTemplate.queryForObject(
-                "SELECT current_trust FROM effective_trust WHERE user_id = ? AND compartment = ?", 
-                Double.class, userId, compartment);
-            return score != null ? score : 100.0;
-        } catch (org.springframework.dao.DataAccessException e) {
-            return 100.0;
-        }
+    public DecisionEngine(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper, TextNormalizationService normalizer) {
+        this(jdbcTemplate, objectMapper, normalizer, new TrustCalculatorService(jdbcTemplate));
     }
 
     private Map<String, TenantPolicyDto> loadPolicies(String tenantId) {
@@ -88,9 +88,13 @@ public class DecisionEngine {
             signals.put("onnx_inference_time_ms", toxicity.inferenceTimeMs());
         }
 
-        Double spamTrust = getTrustScore(userId, "SPAM");
-        Double coordTrust = getTrustScore(userId, "COORDINATION");
-        Double harassTrust = getTrustScore(userId, "HARASSMENT");
+        // 1. Multidimensional Behavioral Trust & Uncertainty
+        UserTrustProfile profile = trustCalculatorService.getProfile(userId, request.getTenantId());
+        signals.putAll(profile.toSignalsMap());
+
+        double spamTrust = profile.getSpam().getScore() * 100.0;
+        double coordTrust = profile.getCoordination().getScore() * 100.0;
+        double harassTrust = profile.getHarassment().getScore() * 100.0;
         signals.put("spam_trust", spamTrust);
         signals.put("coord_trust", coordTrust);
         signals.put("harassment_trust", harassTrust);
@@ -106,9 +110,14 @@ public class DecisionEngine {
 
         Map<String, TenantPolicyDto> policies = loadPolicies(request.getTenantId());
 
-        if (spamTrust < 20.0 || coordTrust < 20.0 || harassTrust < 20.0) {
+        // Low trust check: only apply harsh block if confidence is calibrated, protecting uncertain new users
+        boolean isLowTrust = (spamTrust < 25.0 && profile.getSpam().getConfidence() > 0.45)
+                          || (coordTrust < 25.0 && profile.getCoordination().getConfidence() > 0.45)
+                          || (harassTrust < 25.0 && profile.getHarassment().getConfidence() > 0.45);
+
+        if (isLowTrust) {
             if (!canBypass("TRUST_SCORE", policies, spamTrust, accountAgeDays)) {
-                return new DecisionResult(ModerationDecision.BLOCK, "User trust score too low", signals, 1, "");
+                return new DecisionResult(ModerationDecision.BLOCK, "User behavioral trust score too low", signals, 1, "");
             }
         }
 
@@ -153,7 +162,7 @@ public class DecisionEngine {
         maxSharedHashes = (maxSharedHashes == null) ? 0 : maxSharedHashes;
         signals.put("coordination_score", maxSharedHashes);
 
-        if (maxSharedHashes >= 2) {
+        if (maxSharedHashes >= 2 || profile.hasCoordinationRisk()) {
             if (!canBypass("COORDINATION", policies, spamTrust, accountAgeDays)) {
                 return new DecisionResult(ModerationDecision.REVIEW, "Coordinated posting behavior detected", signals, 1, normalizedText)
                     .withTrustPenalty("COORDINATION", 25.0, 0.0000005);
@@ -186,11 +195,12 @@ public class DecisionEngine {
             }
         }
 
+        // Privilege Gating: External URLs require sustained positive interactions, preventing idle recovery loopholes
         if (Pattern.compile("https?://[a-zA-Z0-9\\\\.\\\\-]+").matcher(normalizedText).find()) {
             signals.put("contains_url", true);
-            if (spamTrust < 80.0) {
+            if (!profile.canBypassUrlReview()) {
                 if (!canBypass("URL_FILTER", policies, spamTrust, accountAgeDays)) {
-                    return new DecisionResult(ModerationDecision.REVIEW, "Suspicious URL from untrusted user", signals, 1, normalizedText)
+                    return new DecisionResult(ModerationDecision.REVIEW, "Suspicious URL from unverified or low-trust user", signals, 1, normalizedText)
                         .withTrustPenalty("SPAM", 5.0, 0.000002);
                 }
             }
@@ -205,16 +215,34 @@ public class DecisionEngine {
                         : "AI flagged as toxic";
 
                 boolean isSevere = flagged != null && (flagged.contains("threat") || flagged.contains("severe_toxic"));
-                double penalty = isSevere ? 25.0 : 10.0;
-                ModerationDecision decision = isSevere ? ModerationDecision.BLOCK : ModerationDecision.REVIEW;
+
+                // Least-restrictive enforcement:
+                // Established contributors involved in arguments receive REVIEW instead of BLOCK
+                ModerationDecision decision;
+                double penalty;
+
+                if (isSevere) {
+                    decision = ModerationDecision.BLOCK;
+                    penalty = 25.0;
+                } else if (profile.isEstablishedPositiveContributor()) {
+                    decision = ModerationDecision.REVIEW;
+                    penalty = 5.0;
+                } else if (profile.getHarassment().getScore() < 0.50) {
+                    decision = ModerationDecision.BLOCK; // Repeat harasser
+                    penalty = 20.0;
+                } else {
+                    decision = ModerationDecision.REVIEW;
+                    penalty = 10.0;
+                }
 
                 return new DecisionResult(decision, reason, signals, 1, normalizedText)
                     .withTrustPenalty("HARASSMENT", penalty, 0.000001);
             }
         }
 
-        return new DecisionResult(ModerationDecision.ALLOW, "Passed all checks", signals, 1, normalizedText);
+        // Reward clean, legitimate participation to build sustained trust
+        return new DecisionResult(ModerationDecision.ALLOW, "Passed all checks", signals, 1, normalizedText)
+            .withPositiveObservation(1.0);
     }
-
-
 }
+

@@ -13,6 +13,7 @@ public class DecisionResult {
     private String compartment;
     private Double penalty;
     private Double decayRate;
+    private Double rewardWeight;
 
     public DecisionResult(ModerationDecision decision, String reason, Map<String, Object> signals, int policyVersion, String normalizedText) {
         this.decision = decision;
@@ -29,6 +30,11 @@ public class DecisionResult {
         return this;
     }
 
+    public DecisionResult withPositiveObservation(Double rewardWeight) {
+        this.rewardWeight = rewardWeight;
+        return this;
+    }
+
     public ModerationDecision getDecision() { return decision; }
     public String getReason() { return reason; }
     public Map<String, Object> getSignals() { return signals; }
@@ -37,4 +43,5 @@ public class DecisionResult {
     public String getCompartment() { return compartment; }
     public Double getPenalty() { return penalty; }
     public Double getDecayRate() { return decayRate; }
+    public Double getRewardWeight() { return rewardWeight; }
 }

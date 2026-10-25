@@ -40,6 +40,9 @@ public class ContentServiceTest {
     @Mock
     private PlatformTransactionManager transactionManager;
 
+    @Mock
+    private com.shhmods.engine.trust.TrustCalculatorService trustCalculatorService;
+
     private ObjectMapper objectMapper;
     private ContentService contentService;
 
@@ -47,7 +50,7 @@ public class ContentServiceTest {
     void setUp() {
         objectMapper = new ObjectMapper();
         lenient().when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        contentService = new ContentService(jdbcTemplate, onnxClassifierService, decisionEngine, objectMapper, transactionManager);
+        contentService = new ContentService(jdbcTemplate, onnxClassifierService, decisionEngine, objectMapper, transactionManager, trustCalculatorService);
     }
 
     @Test
@@ -144,5 +147,92 @@ public class ContentServiceTest {
 
         assertTrue(result);
         verify(jdbcTemplate).update(contains("INSERT INTO audit_log"), eq("User GDPR request"), eq("555"));
+    }
+
+    @Test
+    void testContentCreation_WithPenalty_RecordsInfraction() {
+        ContentRequest request = new ContentRequest();
+        request.setTenantId("test_tenant");
+        request.setExternalUserId("bad_user");
+        request.setUsername("spammer");
+        request.setContentText("Buy cheap crypto now http://spam.xyz");
+        request.setContentType("POST");
+
+        when(jdbcTemplate.query(contains("idempotency_record"), any(RowMapper.class), anyString(), anyString()))
+                .thenReturn(List.of());
+        when(jdbcTemplate.queryForObject(contains("users"), eq(Long.class), any(), any(), any(), any()))
+                .thenReturn(202L);
+        when(onnxClassifierService.classify(anyString())).thenReturn(ToxicityResult.safe());
+
+        DecisionResult penalizedResult = new DecisionResult(ModerationDecision.REVIEW, "Suspicious URL", Map.of(), 1, "buy cheap crypto")
+                .withTrustPenalty("SPAM", 15.0, 0.000001);
+        when(decisionEngine.evaluate(eq(request), eq(202L), anyString(), any(ToxicityResult.class))).thenReturn(penalizedResult);
+
+        when(jdbcTemplate.queryForObject(contains("INSERT INTO content"), eq(Long.class), any(), any(), any(), any(), any(), any()))
+                .thenReturn(1001L);
+        when(jdbcTemplate.queryForObject(contains("INSERT INTO moderation_event"), eq(Object.class), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn("evt-review-1");
+
+        ModerationResponse response = contentService.createContent(request, "key-penalize");
+
+        assertNotNull(response);
+        assertEquals(ModerationDecision.REVIEW, response.getDecision());
+
+        // Verify infraction penalty recorded via TrustCalculatorService
+        verify(trustCalculatorService).recordInfraction(eq(202L), eq("test_tenant"), eq("SPAM"), eq(15.0), eq("Suspicious URL"));
+        verify(trustCalculatorService, never()).recordPositiveObservation(anyLong(), anyString(), anyDouble());
+    }
+
+    @Test
+    void testContentCreation_WithPositiveObservation_RecordsReward() {
+        ContentRequest request = new ContentRequest();
+        request.setTenantId("test_tenant");
+        request.setExternalUserId("good_user");
+        request.setUsername("bob");
+        request.setContentText("Constructive feedback on feature RFC");
+        request.setContentType("POST");
+
+        when(jdbcTemplate.query(contains("idempotency_record"), any(RowMapper.class), anyString(), anyString()))
+                .thenReturn(List.of());
+        when(jdbcTemplate.queryForObject(contains("users"), eq(Long.class), any(), any(), any(), any()))
+                .thenReturn(303L);
+        when(onnxClassifierService.classify(anyString())).thenReturn(ToxicityResult.safe());
+
+        DecisionResult cleanResult = new DecisionResult(ModerationDecision.ALLOW, "Passed all checks", Map.of(), 1, "constructive feedback")
+                .withPositiveObservation(1.0);
+        when(decisionEngine.evaluate(eq(request), eq(303L), anyString(), any(ToxicityResult.class))).thenReturn(cleanResult);
+
+        when(jdbcTemplate.queryForObject(contains("INSERT INTO content"), eq(Long.class), any(), any(), any(), any(), any(), any()))
+                .thenReturn(1002L);
+        when(jdbcTemplate.queryForObject(contains("INSERT INTO moderation_event"), eq(Object.class), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn("evt-allow-2");
+
+        ModerationResponse response = contentService.createContent(request, "key-reward");
+
+        assertNotNull(response);
+        assertEquals(ModerationDecision.ALLOW, response.getDecision());
+
+        // Verify positive reward recorded via TrustCalculatorService
+        verify(trustCalculatorService).recordPositiveObservation(eq(303L), eq("test_tenant"), eq(1.0));
+        verify(trustCalculatorService, never()).recordInfraction(anyLong(), anyString(), anyString(), anyDouble(), anyString());
+    }
+
+    @Test
+    void testGetUserTrustProfile_DelegatesToTrustCalculatorService() {
+        com.shhmods.engine.trust.UserTrustProfile expected = new com.shhmods.engine.trust.UserTrustProfile(
+            404L, "test_tenant",
+            new com.shhmods.engine.trust.TrustDimension("SPAM", 10.0, 0.0),
+            new com.shhmods.engine.trust.TrustDimension("HARASSMENT", 10.0, 0.0),
+            new com.shhmods.engine.trust.TrustDimension("COORDINATION", 10.0, 0.0),
+            new com.shhmods.engine.trust.TrustDimension("GENERAL_ABUSE", 10.0, 0.0),
+            java.time.Instant.now(), java.time.Instant.now()
+        );
+
+        when(trustCalculatorService.getProfile(404L, "test_tenant")).thenReturn(expected);
+
+        com.shhmods.engine.trust.UserTrustProfile result = contentService.getUserTrustProfile(404L, "test_tenant");
+
+        assertSame(expected, result);
+        verify(trustCalculatorService).getProfile(404L, "test_tenant");
     }
 }

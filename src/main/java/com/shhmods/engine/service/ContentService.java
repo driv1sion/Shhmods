@@ -27,17 +27,28 @@ public class ContentService {
     private final DecisionEngine decisionEngine;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
+    private final com.shhmods.engine.trust.TrustCalculatorService trustCalculatorService;
+
+    public ContentService(JdbcTemplate jdbcTemplate, 
+                          OnnxClassifierService onnxClassifierService, 
+                          DecisionEngine decisionEngine, 
+                          ObjectMapper objectMapper,
+                          PlatformTransactionManager transactionManager,
+                          com.shhmods.engine.trust.TrustCalculatorService trustCalculatorService) {
+        this.jdbcTemplate = jdbcTemplate;
+        this.onnxClassifierService = onnxClassifierService;
+        this.decisionEngine = decisionEngine;
+        this.objectMapper = objectMapper;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.trustCalculatorService = trustCalculatorService;
+    }
 
     public ContentService(JdbcTemplate jdbcTemplate, 
                           OnnxClassifierService onnxClassifierService, 
                           DecisionEngine decisionEngine, 
                           ObjectMapper objectMapper,
                           PlatformTransactionManager transactionManager) {
-        this.jdbcTemplate = jdbcTemplate;
-        this.onnxClassifierService = onnxClassifierService;
-        this.decisionEngine = decisionEngine;
-        this.objectMapper = objectMapper;
-        this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this(jdbcTemplate, onnxClassifierService, decisionEngine, objectMapper, transactionManager, new com.shhmods.engine.trust.TrustCalculatorService(jdbcTemplate));
     }
 
     public ModerationResponse createContent(ContentRequest request) {
@@ -131,13 +142,11 @@ public class ContentService {
                 request.getTenantId(), userId, contentHash, result.getNormalizedText(), signalsJson, 
                 result.getPolicyVersion(), result.getDecision().name(), prevHash, eventHash);
 
-            // 6.3 Record Trust Event if applicable
+            // 6.3 Record Multidimensional Trust updates
             if (result.getPenalty() != null) {
-                String trustSql = """
-                    INSERT INTO trust_event (user_id, compartment, penalty, decay_rate)
-                    VALUES (?, ?, ?, ?)
-                    """;
-                jdbcTemplate.update(trustSql, userId, result.getCompartment(), result.getPenalty(), result.getDecayRate());
+                trustCalculatorService.recordInfraction(userId, request.getTenantId(), result.getCompartment(), result.getPenalty(), result.getReason());
+            } else if (result.getRewardWeight() != null) {
+                trustCalculatorService.recordPositiveObservation(userId, request.getTenantId(), result.getRewardWeight());
             }
 
             // 6.4 Record Flag if content is flagged for review or blocked
@@ -210,6 +219,10 @@ public class ContentService {
             return true;
         }
         return false;
+    }
+
+    public com.shhmods.engine.trust.UserTrustProfile getUserTrustProfile(Long userId, String tenantId) {
+        return trustCalculatorService.getProfile(userId, tenantId);
     }
 
     private String computeSha256(String text) {
